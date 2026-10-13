@@ -1,0 +1,1 @@
+Arquivo ficticio na raiz, fora do escopo autorizado, para o teste negativo do bootstrap.
