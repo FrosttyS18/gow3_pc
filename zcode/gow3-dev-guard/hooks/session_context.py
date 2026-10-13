@@ -29,7 +29,7 @@ def git(root: Path, *args: str) -> str:
 
 def main() -> int:
     payload = g.read_payload() or {}
-    root = g.project_root(payload)
+    root = g.repo_root(payload)
     branch = g.git_branch(root) or "?"
     origin = git(root, "remote", "get-url", "origin")
     repo = re.sub(r"\.git$", "", origin.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]) \

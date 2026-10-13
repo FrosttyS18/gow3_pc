@@ -1,10 +1,9 @@
 {
   "name": "gow3-dev-guard",
-  "version": "0.1.0",
-  "description": "Deterministic guardrails for the gow3_pc fork: PreToolUse blocks destructive operations, direct main changes, engine/patch-whitelist/proprietary-file writes; Stop validates the GOW3 ZCODE FINAL REPORT; SessionStart injects project context. Pure-local Python, no game files touched.",
+  "version": "0.2.0",
+  "description": "Deterministic guardrails for the gow3_pc fork: PreToolUse blocks destructive operations, direct main changes, engine/patch-whitelist/proprietary-file writes and unverifiable write commands (fail-closed); Stop validates the GOW3 ZCODE FINAL REPORT; SessionStart injects project context. Pure-local Python, no game files touched.",
   "author": {
     "name": "FrosttyS18/gow3_pc"
   },
-  "license": "GPL-2.0-or-later",
-  "hooks": "hooks"
+  "license": "GPL-2.0-or-later"
 }

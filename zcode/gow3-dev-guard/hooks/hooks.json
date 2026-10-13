@@ -15,7 +15,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Bash|Edit|Write|ApplyPatch",
+        "matcher": "Bash|Edit|Write|ApplyPatch|MultiEdit",
         "hooks": [
           {
             "type": "process",

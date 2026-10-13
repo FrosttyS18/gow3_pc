@@ -101,6 +101,17 @@ NEXT
 ```"""
 
 
+def temp_repo(default_branch: str = "feat/x") -> Path:
+    """A disposable git repository with one commit, on `default_branch`."""
+    tmp = Path(tempfile.mkdtemp(prefix="gow3-guard-fixture-"))
+    repo = tmp / "r"
+    repo.mkdir()
+    for args in (["init", "-b", default_branch], ["config", "user.email", "t@t"],
+                 ["config", "user.name", "t"], ["commit", "--allow-empty", "-m", "x"]):
+        subprocess.run(["git", "-C", str(repo), *args], capture_output=True, timeout=30)
+    return repo
+
+
 class PluginDeclaration(unittest.TestCase):
     """The plugin declares itself exactly the way the installed ZCode expects."""
 
@@ -108,9 +119,13 @@ class PluginDeclaration(unittest.TestCase):
         manifest = json.loads((PLUGIN / ".zcode-plugin" / "plugin.json").read_text(encoding="utf-8"))
         self.assertTrue(re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,127}", manifest["name"]),
                         "plugin name must match the official pattern")
-        self.assertEqual(manifest.get("hooks"), "hooks")
+        # hooks/hooks.json is auto-discovered at its default location; an explicit
+        # "hooks": "hooks" declaration is redundant (audit item 6) and must stay out.
+        self.assertNotIn("hooks", manifest)
         for component in ("commands", "skills", "mcpServers"):
             self.assertNotIn(component, manifest, "this plugin intentionally has only hooks")
+        self.assertTrue((HOOKS / "hooks.json").is_file(),
+                        "default hooks/hooks.json must exist for auto-discovery")
 
     def test_hooks_json_schema(self):
         spec = json.loads((HOOKS / "hooks.json").read_text(encoding="utf-8"))
@@ -281,7 +296,7 @@ class AllowsSafeOperations(unittest.TestCase):
     def test_common_build_and_test(self):
         for command in ("ls -la", "python -m unittest discover -s tests", "bash build.sh",
                         "ninja -C out/gpu mp3-test", "cmake -S gpu -B out/gpu -G Ninja",
-                        "git add docs/x.md", "git commit -m 'docs: x'",
+                        "git add docs/DEV-BASELINE.md", "git commit -m 'docs: x'",
                         "git push origin chore/zcode-harness"):
             self.assertEqual(bash(command)[0], PASS, command)
 
@@ -380,21 +395,25 @@ class StopLoopSafety(unittest.TestCase):
 
 
 class Robustness(unittest.TestCase):
-    """No hook may crash (non-{0,2} exit) on malformed input."""
+    """Malformed input must never crash a hook. For the write-capable PreToolUse it now
+    BLOCKS with a specific reason (audit: fail-closed); SessionStart/Stop stay fail-open —
+    they cannot write and must not trap the session."""
 
-    def test_invalid_json_all_hooks(self):
-        for script in ("pre_tool_use.py", "stop_guard.py", "session_context.py"):
+    def test_invalid_json_write_hook_blocks(self):
+        rc, err, _ = run_hook("pre_tool_use.py", None, raw_stdin=b"{not json\x00\xff")
+        self.assertEqual(rc, BLOCK)
+        self.assertIn("fail-closed", err.lower())
+
+    def test_invalid_json_context_hooks_pass(self):
+        for script in ("stop_guard.py", "session_context.py"):
             rc, _, _ = run_hook(script, None, raw_stdin=b"{not json\x00\xff")
-            self.assertIn(rc, (PASS,), f"{script} crashed on invalid JSON: {rc}")
-
-    def test_missing_fields_all_hooks(self):
-        for script in ("pre_tool_use.py", "stop_guard.py", "session_context.py"):
-            rc, _, _ = run_hook(script, {})
             self.assertEqual(rc, PASS, script)
 
-    def test_tool_input_not_object(self):
-        rc, _, _ = run_hook("pre_tool_use.py", {"tool_name": "Bash", "tool_input": "ls"})
-        self.assertEqual(rc, PASS)
+    def test_missing_fields(self):
+        # PreToolUse: cannot tell what would be written -> block. Others: pass.
+        self.assertEqual(run_hook("pre_tool_use.py", {})[0], BLOCK)
+        for script in ("stop_guard.py", "session_context.py"):
+            self.assertEqual(run_hook(script, {})[0], PASS, script)
 
     def test_missing_transcript_fails_open(self):
         rc, _, _ = run_hook("stop_guard.py", {"session_id": "sx"})  # no transcript_path
@@ -425,6 +444,216 @@ class Robustness(unittest.TestCase):
                      {"ZCODE_PLUGIN_DATA": tmp})
             after = sorted(p.name for p in Path(tmp).iterdir())
             self.assertEqual(before, after, "SessionStart must not create files")
+
+
+class AuditRegressions(unittest.TestCase):
+    """Every case below reproduces a protection gap found by the independent audit of 7e85be1.
+    They must BLOCK (or specifically PASS where noted) after the hardening — and they are
+    written first, against the vulnerable implementation, as the red step of the fix."""
+
+    # --- 1. destructive deletes must resolve and normalize paths -------------------------
+    def test_rmrf_current_and_parent_dir_blocked(self):
+        for command in ("rm -rf .", "rm -rf ..", "rm -rf ./", "rm -fr ."):
+            self.assertEqual(bash(command)[0], BLOCK, command)
+
+    def test_rmrf_repo_root_absolute_blocked(self):
+        self.assertEqual(bash(f"rm -rf {REPO}")[0], BLOCK)
+        self.assertEqual(bash(f"rm -rf {REPO}/")[0], BLOCK)
+
+    def test_rmrf_protected_absolute_blocked(self):
+        self.assertEqual(bash(f"rm -rf {REPO}/src")[0], BLOCK)
+        self.assertEqual(bash(f"rm -rf {REPO}\\gpu\\shadps4")[0], BLOCK)
+        self.assertEqual(bash(f"rm -rf {REPO}/.git")[0], BLOCK)
+
+    def test_rmrf_proprietary_absolute_blocked(self):
+        self.assertEqual(bash("rm -rf D:/games/CUSA01623/savedata")[0], BLOCK)
+        self.assertEqual(bash("rm -rf 'D:\\games\\dump\\eboot.bin'")[0], BLOCK)
+
+    def test_rmrf_ancestor_of_repo_blocked(self):
+        self.assertEqual(bash("rm -rf C:/gow3")[0], BLOCK)
+
+    def test_rmrf_inside_repo_needs_authorized_target(self):
+        self.assertEqual(bash("rm -rf zcode")[0], BLOCK)
+        self.assertEqual(bash("rm -rf tests")[0], BLOCK)
+        # explicitly authorized rebuildable/temporary locations still pass
+        self.assertEqual(bash("rm -rf zcode/gow3-dev-guard/tests/__pycache__")[0], PASS)
+        self.assertEqual(bash("rm -rf out/gpu")[0], PASS)
+        self.assertEqual(bash("rm -rf dist")[0], PASS)
+
+    def test_rmrf_external_temp_allowed(self):
+        self.assertEqual(bash("rm -rf C:/Users/x/AppData/Local/Temp/pytest-thing")[0], PASS)
+
+    # --- 2. complete write-tool coverage ------------------------------------------------
+    def test_write_without_identifiable_path_blocks(self):
+        rc, _, _ = run_hook("pre_tool_use.py", {"tool_name": "Edit", "tool_input": {}})
+        self.assertEqual(rc, BLOCK)
+        rc, _, _ = run_hook("pre_tool_use.py", {"tool_name": "Write",
+                                                "tool_input": {"content": "x"}})
+        self.assertEqual(rc, BLOCK)
+
+    def test_applypatch_patch_text_analyzed(self):
+        payload = {"tool_name": "ApplyPatch", "tool_input": {
+            "patch": "*** Begin Patch\n*** Update File: src/runtime_services.c\n@@\n-x\n+y\n"
+                     "*** End Patch"}}
+        rc, err, _ = run_hook("pre_tool_use.py", payload)
+        self.assertEqual(rc, BLOCK)
+        self.assertIn("src/runtime_services.c", err)
+
+    def test_applypatch_patch_list_analyzed(self):
+        payload = {"tool_name": "ApplyPatch", "tool_input": {
+            "patches": [{"path": "docs/a.md"}, {"file_path": "scripts/patches.py"}]}}
+        rc, err, _ = run_hook("pre_tool_use.py", payload)
+        self.assertEqual(rc, BLOCK)
+        self.assertIn("scripts/patches.py", err)
+
+    def test_multiedit_analyzed(self):
+        payload = {"tool_name": "MultiEdit", "tool_input": {
+            "file_path": str(REPO / "src" / "probe.c"), "edits": [{"old": "a", "new": "b"}]}}
+        self.assertEqual(run_hook("pre_tool_use.py", payload)[0], BLOCK)
+
+    def test_multiedit_unresolvable_blocks(self):
+        payload = {"tool_name": "MultiEdit", "tool_input": {"edits": [{"old": "a", "new": "b"}]}}
+        self.assertEqual(run_hook("pre_tool_use.py", payload)[0], BLOCK)
+
+    # --- 3. bash write policy beyond the blacklist --------------------------------------
+    def test_redirection_to_protected_blocked(self):
+        for command in ("echo x > src/probe.c", "echo x >> gpu/shadps4/vk_instance.cpp",
+                        "tee patches/God_of_War_III_Remastered.xml",
+                        "sed -i s/a/b/ scripts/patches.py",
+                        "cp dist/a.bin src/a.bin", "mv out/x.bin gpu/shim/gow3gpu.cpp",
+                        "dd of=src/probe.c if=x.bin", "truncate -s 0 run.py"):
+            self.assertEqual(bash(command)[0], BLOCK, command)
+
+    def test_redirection_to_safe_targets_allowed(self):
+        for command in ("python -m unittest discover -s tests > out/test.log",
+                        "echo hi > C:/gow3/build.log", "cp docs/a.md docs/b.md",
+                        "tee out/x.log", "sed -i s/a/b/ launcher/note.md"):
+            self.assertEqual(bash(command)[0], PASS, command)
+
+    def test_powershell_write_to_protected_blocked(self):
+        rc, _, _ = bash("powershell -NoProfile -Command \"Set-Content -Path 'gpu/shadps4/x.cpp'"
+                        " -Value hi\"")
+        self.assertEqual(rc, BLOCK)
+        rc, _, _ = bash("pwsh -Command \"Out-File -FilePath patches/list.xml -InputObject x\"")
+        self.assertEqual(rc, BLOCK)
+
+    def test_powershell_write_without_resolvable_path_blocks(self):
+        rc, _, _ = bash("powershell -Command Set-Content $env:TMP\\x -Value hi")
+        self.assertEqual(rc, BLOCK)  # write cmdlet with an unverifiable target: fail closed
+
+    def test_powershell_read_only_allowed(self):
+        rc, _, _ = bash("powershell -NoProfile -Command \"Compress-Archive -Path out -DestinationPath dist.zip\"")
+        self.assertEqual(rc, PASS)
+
+    def test_git_add_protected_path_blocked(self):
+        self.assertEqual(bash("git add src/probe.c")[0], BLOCK)
+        self.assertEqual(bash(f"git add {REPO}/scripts/patches.py")[0], BLOCK)
+        repo = temp_repo()
+        try:
+            (repo / "launcher").mkdir()
+            (repo / "launcher" / "x.py").write_text("x", encoding="utf-8")
+            self.assertEqual(bash("git add launcher/x.py", project=str(repo))[0], PASS)
+        finally:
+            subprocess.run(["rm", "-rf", str(repo)], capture_output=True)
+
+    def test_git_commit_staged_protected_blocked(self):
+        repo = temp_repo()
+        try:
+            (repo / "src").mkdir()
+            (repo / "src" / "runtime.c").write_text("x", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "src/runtime.c"],
+                           capture_output=True, timeout=30)
+            self.assertEqual(bash("git commit -m x", project=str(repo))[0], BLOCK)
+            self.assertEqual(bash(f"git -C {repo} commit -m x", project=str(repo))[0], BLOCK)
+        finally:
+            subprocess.run(["rm", "-rf", str(repo)], capture_output=True)
+
+    def test_git_commit_staged_safe_allowed(self):
+        repo = temp_repo()
+        try:
+            (repo / "launcher").mkdir()
+            (repo / "launcher" / "x.py").write_text("x", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "launcher/x.py"],
+                           capture_output=True, timeout=30)
+            self.assertEqual(bash("git commit -m x", project=str(repo))[0], PASS)
+        finally:
+            subprocess.run(["rm", "-rf", str(repo)], capture_output=True)
+
+    def test_git_commit_branch_unknown_blocks(self):
+        with tempfile.TemporaryDirectory() as tmp:  # not a git repository at all
+            self.assertEqual(bash("git commit -m x", project=tmp)[0], BLOCK)
+
+    def test_git_worktree_discard_blocked(self):
+        for command in ("git checkout -- src/probe.c", "git restore src/",
+                        "git stash push", "git stash pop", "git rm src/probe.c"):
+            self.assertEqual(bash(command)[0], BLOCK, command)
+
+    # --- 4. fail-closed for write operations --------------------------------------------
+    def test_pretooluse_invalid_json_blocks(self):
+        rc, err, _ = run_hook("pre_tool_use.py", None, raw_stdin=b"{not json\x00\xff")
+        self.assertEqual(rc, BLOCK)
+        self.assertIn("fail-closed", err.lower())
+
+    def test_pretooluse_missing_tool_name_blocks(self):
+        self.assertEqual(run_hook("pre_tool_use.py", {})[0], BLOCK)
+
+    def test_pretooluse_tool_input_not_object_blocks(self):
+        self.assertEqual(run_hook("pre_tool_use.py",
+                                  {"tool_name": "Bash", "tool_input": "ls"})[0], BLOCK)
+
+    def test_pretooluse_bash_without_command_blocks(self):
+        self.assertEqual(run_hook("pre_tool_use.py",
+                                  {"tool_name": "Bash", "tool_input": {}})[0], BLOCK)
+
+
+class AuditRegressionsStop(unittest.TestCase):
+    """Stop-hook gaps from the audit."""
+
+    def hook(self, last_message=None, transcript_text=None, session="aud"):
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = {"session_id": session}
+            if last_message is not None:
+                payload["last_assistant_message"] = last_message
+            if transcript_text is not None:
+                path = Path(tmp) / "t.jsonl"
+                path.write_text(json.dumps({"message": {"role": "assistant",
+                                                        "content": [{"type": "text",
+                                                                     "text": transcript_text}]}}) + "\n",
+                                encoding="utf-8")
+                payload["transcript_path"] = str(path)
+            return run_hook("stop_guard.py", payload, {"ZCODE_PLUGIN_DATA": tmp})
+
+    def test_risks_section_required(self):
+        broken = VALID_REPORT.replace("RISKS\n  NONE\n", "")
+        rc, err, _ = self.hook(last_message=broken)
+        self.assertEqual(rc, BLOCK)
+        self.assertIn("RISKS", err)
+
+    def test_field_must_be_inside_its_own_section(self):
+        # BASELINE's own Status line removed; TASK still has one — a global regex would pass.
+        broken = VALID_REPORT.replace("BASELINE\n  Status:      PASS\n",
+                                      "BASELINE\n")
+        rc, err, _ = self.hook(last_message=broken)
+        self.assertEqual(rc, BLOCK)
+        self.assertIn("BASELINE.Status", err)
+
+    def test_multiple_text_blocks_rejected(self):
+        doubled = VALID_REPORT + "\n```text\nextra block\n```\n"
+        rc, err, _ = self.hook(last_message=doubled)
+        self.assertEqual(rc, BLOCK)
+        self.assertIn("text block", err)
+
+    def test_last_assistant_message_takes_priority(self):
+        # payload message has no report, transcript has a valid one: must BLOCK.
+        rc, _, _ = self.hook(last_message="pronto", transcript_text=VALID_REPORT)
+        self.assertEqual(rc, BLOCK)
+        # payload message valid, no transcript at all: must PASS.
+        rc, _, _ = self.hook(last_message=VALID_REPORT)
+        self.assertEqual(rc, PASS)
+
+    def test_valid_report_still_passes(self):
+        rc, _, _ = self.hook(transcript_text=VALID_REPORT)
+        self.assertEqual(rc, PASS)
 
 
 if __name__ == "__main__":

@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""Stop hook of gow3-dev-guard.
+"""Stop hook of gow3-dev-guard (hardened after the independent audit of 7e85be1).
 
-Validates that the final assistant message carries the GOW3 — ZCODE REPORT contract defined
-in AGENTS.md: one ```text fenced block, the report header, every required section and every
-required field with a non-empty value. Structural check only — it proves the report exists
-and is complete, it does not certify that quoted logs are true (that stays with code review).
+Validates that the final assistant message satisfies the ZCODE FINAL REPORT CONTRACT
+(AGENTS.md): exactly one ```text fenced block, the report header, every required section —
+including RISKS — and every required field, each checked inside its own section, with a
+non-empty value. Structural check only: it proves the report exists and is complete, not
+that quoted logs are true (code review and CI stay owners of content).
 
-Loop safety (deterministic, no host cooperation required):
-  - stop_hook_active in the payload => pass immediately (the host already continued once);
-  - a per-session counter lets the hook block at most 2 times; from the 3rd Stop on it passes
-    with a warning, so the session can always end.
+Message source (audit item 5): the host-provided `last_assistant_message` field takes
+priority, with the transcript (JSONL) as fallback.
 
-Fail-open (exit 0 + warning) when the transcript cannot be read or has no assistant text.
+Loop safety (deterministic, host-independent): `stop_hook_active` passes at once; a
+per-session counter blocks at most 2 times (the host itself caps continuations); a valid
+report resets the counter. Unreadable input fails open — Stop must never trap a session.
 """
 import json
 import re
@@ -25,7 +26,7 @@ REPORT_HEADER = re.compile(r"GOW3\s+[—-]\s+ZCODE\s+REPORT")
 FENCED = re.compile(r"```text[^\n]*\n(.*?)```", re.DOTALL)
 
 REQUIRED_SECTIONS = ("TASK", "GIT", "BASELINE", "CHANGES", "VALIDATION", "AUDIT GATE",
-                     "FINAL STATUS", "NEXT")
+                     "RISKS", "FINAL STATUS", "NEXT")
 REQUIRED_FIELDS = {
     "TASK": ("Name", "Status"),
     "GIT": ("Branch", "Commit", "Remote"),
@@ -33,17 +34,24 @@ REQUIRED_FIELDS = {
     "CHANGES": ("Added", "Modified", "Removed", "Files"),
     "VALIDATION": ("Python", "Native", "Build", "Package", "UI", "Runtime"),
     "AUDIT GATE": ("Result", "Regressions", "Evidence"),
-    "FINAL STATUS": (),
-    "NEXT": (),
 }
+SECTION_HEADER = re.compile(
+    r"^\s*(" + "|".join(re.escape(section) for section in REQUIRED_SECTIONS) + r")\s*$")
 STATUS_VALUES = ("READY_FOR_REVIEW", "BLOCKED", "FAILED")
 MAX_BLOCKS_PER_SESSION = 2
 
 
-def last_assistant_text(transcript_path: str) -> str | None:
-    """The concatenated text of the last assistant message in a JSONL transcript."""
+def last_assistant_message(payload: dict) -> str | None:
+    """The host-provided last message first (official field), then the transcript."""
+    for key in ("last_assistant_message", "lastAssistantMessage"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    transcript = payload.get("transcript_path") or payload.get("transcriptPath")
+    if not transcript:
+        return None
     try:
-        lines = Path(transcript_path).read_text(encoding="utf-8", errors="replace").splitlines()
+        lines = Path(str(transcript)).read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
         return None
     for line in reversed(lines):
@@ -73,32 +81,52 @@ def last_assistant_text(transcript_path: str) -> str | None:
     return None
 
 
+def parse_sections(block: str) -> dict[str, list[str]]:
+    """The block's lines grouped under their section header."""
+    sections: dict[str, list[str]] = {}
+    current: str | None = None
+    for line in block.splitlines():
+        header = SECTION_HEADER.match(line)
+        if header:
+            current = header.group(1)
+            sections.setdefault(current, [])
+        elif current is not None:
+            sections[current].append(line)
+    return sections
+
+
 def report_defects(text: str) -> list[str]:
     """Missing/invalid pieces of the final report, in contract order."""
-    defects = []
+    defects: list[str] = []
     blocks = FENCED.findall(text)
-    block = blocks[-1] if blocks else None
-    if block is None:
+    if len(blocks) == 0:
         return ["no ```text fenced block found — the report must be one text code block"]
+    if len(blocks) > 1:
+        defects.append(f"exactly one ```text block required, found {len(blocks)}")
+    block = blocks[-1]
     if not REPORT_HEADER.search(block):
         defects.append("missing header 'GOW3 — ZCODE REPORT'")
+
+    sections = parse_sections(block)
     for section in REQUIRED_SECTIONS:
-        pattern = rf"^\s*{re.escape(section)}\s*$"
-        if not re.search(pattern, block, re.MULTILINE):
+        if section not in sections:
             defects.append(f"missing section {section}")
     for section, fields in REQUIRED_FIELDS.items():
+        lines = sections.get(section, [])
         for field in fields:
-            # Horizontal whitespace only after the colon: \s* would swallow the newline and
-            # "validate" an empty value against the next line's content.
-            pattern = rf"^\s*{re.escape(field)}:[ \t]*\S"
-            if not re.search(pattern, block, re.MULTILINE):
+            # Horizontal whitespace only after the colon: \s* would swallow the newline
+            # and "validate" an empty value against the next line's content.
+            if not any(re.match(rf"^\s*{re.escape(field)}:[ \t]*\S", line) for line in lines):
                 defects.append(f"missing or empty field {section}.{field}")
-    status = re.search(r"^\s*FINAL STATUS\s*\n\s*(\S+)", block, re.MULTILINE)
-    if status and status.group(1) not in STATUS_VALUES:
+    status_lines = [line.strip() for line in sections.get("FINAL STATUS", []) if line.strip()]
+    if status_lines and status_lines[0] not in STATUS_VALUES:
         defects.append(f"FINAL STATUS must be one of {', '.join(STATUS_VALUES)}")
-    next_value = re.search(r"^\s*NEXT\s*\n\s*(.+)", block, re.MULTILINE)
-    if next_value and not next_value.group(1).strip():
-        defects.append("NEXT is empty")
+    if not any(line.strip() for line in sections.get("RISKS", [])):
+        if "RISKS" in sections:
+            defects.append("RISKS section is empty (write NONE when there are none)")
+    if not any(line.strip() for line in sections.get("NEXT", [])):
+        if "NEXT" in sections:
+            defects.append("NEXT section is empty")
     return defects
 
 
@@ -117,14 +145,14 @@ def main() -> int:
     except (OSError, ValueError):
         count = 0
     if count >= MAX_BLOCKS_PER_SESSION:
-        g.warn(f"already blocked {count} times in this session; passing so the session can end."
-               " The final report is still missing or invalid — fix it in the next message.")
+        g.warn(f"already blocked {count} times in this session; passing so the session can"
+               " end. The final report is still missing or invalid — fix it in the next"
+               " message.")
         return g.PASS
 
-    transcript = payload.get("transcript_path") or payload.get("transcriptPath")
-    text = last_assistant_text(str(transcript)) if transcript else None
+    text = last_assistant_message(payload)
     if text is None:
-        g.warn("no readable assistant message in the transcript; failing open")
+        g.warn("no readable assistant message; failing open")
         return g.PASS
 
     defects = report_defects(text)
