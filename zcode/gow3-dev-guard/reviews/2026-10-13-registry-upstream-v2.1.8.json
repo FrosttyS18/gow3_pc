@@ -1,0 +1,9 @@
+{
+  "head_sha": "1be3a8bee2e57fe0edde7576081b3550db214ac4",
+  "approved_by": "FrosttyS18 (mantenedor)",
+  "date": "2026-10-13",
+  "kind": "APPROVED_UPSTREAM registry expansion",
+  "scope": "PR chore/registry-upstream-v2.1.8 — adicionar exclusivamente a entrada windows-v2.1.8 {repo https://github.com/FelipePrado0/gow3_pc, commit bb74e41cc3c9435c89e3bbd3994b608ad3cff627} ao dict APPROVED_UPSTREAM em zcode/gow3-dev-guard/tools/audit_gate.py",
+  "rationale": "Autoriza a exceção blob-provada do PR #4 (integracao da arvore oficial completa windows-v2.1.8, 65 arquivos com prova de blob contra o commit acima). O verificador nao foi modificado para aprovar nada automaticamente; a entrada apenas registra o commit imutavel da tag oficial windows-v2.1.8.",
+  "reviewed_diff": "1 arquivo, +4 linhas (somente a entrada do dict); sem outras mudancas no branch"
+}
