@@ -5,6 +5,12 @@ Este repositório é um fork do port comunitário de God of War III Remastered p
 
 O ZCode é o agente executor: inspeciona código, executa comandos, prepara dependências, implementa, testa, registra evidências e corrige falhas. O usuário faz a validação visual/funcional final; não delegue a ele comandos de desenvolvimento ou a investigação de erros que o agente pode realizar.
 
+## Escopo definitivo da UI (decisão do mantenedor, 2026-10-12)
+1. **Launcher Windows:** redesign completo, moderno, cinematográfico e exclusivo de God of War III Remastered, preservando todas as funções atuais e adotando português do Brasil. O launcher NÃO será biblioteca de jogos, loja, dashboard administrativo nem plataforma com funcionalidades fictícias.
+2. **Tela de saves in-game:** personalização visual da interface de salvar/carregar em Dear ImGui, sem modificar o backend nem comprometer a compatibilidade.
+3. **FORA do escopo, definitivamente:** o menu in-game aberto por Insert/R3+L2. Não redesenhar, refatorar nem modificar.
+Toda implementação depende de aprovação posterior do mantenedor.
+
 ## Mapa canônico do código
 - `launcher/gow3_launcher_win.py` — launcher Windows atual em Python/Tkinter: configurações, navegação, iniciar jogo, diagnóstico, mods, patches, controles, backups e atualizações.
 - `launcher/gow3_lang.py` e `launcher/button_icons.py` — traduções e ícones de controle.
@@ -52,8 +58,8 @@ Leia os arquivos reais antes de afirmar contratos ou propor mudanças. Não trat
 Não criar múltiplos arquivos Markdown de estado concorrentes. A referência permanente de comportamento do agente é este `AGENTS.md`. O bootstrap pode registrar uma baseline verificável em um único `docs/DEV-BASELINE.md`, com data, commit e comandos/resultados.
 
 ## Engenharia de UI
-- Launcher atual: Python/Tkinter. O alvo é visual premium com navegação e UX modernas, mas **a escolha entre evoluir Tkinter e migrar para React/Tauri exige proposta arquitetural**. Se houver migração, criar uma camada de integração explícita para as funcionalidades existentes, sem depender de scraping da interface antiga.
-- Menu e save in-game: Dear ImGui/C++ em `gpu/shim/gow3_overlay.cpp`. Não assumir que uma UI React pode ser embutida diretamente no jogo sem nova integração.
+- Launcher atual: Python/Tkinter. O alvo é visual premium com navegação e UX modernas, em português do Brasil, mas **a escolha entre evoluir Tkinter e migrar para React/Tauri exige proposta arquitetural**. Se houver migração, criar uma camada de integração explícita para as funcionalidades existentes, sem depender de scraping da interface antiga.
+- Tela de saves in-game: Dear ImGui/C++ em `gpu/shim/gow3_overlay.cpp` (`ChoiceBox()`/`TextEntryBox()`), personalização apenas visual; backend e entrada preservados. O menu Insert/R3+L2 (`Menu()`) está **definitivamente fora do escopo** — não modificar. Não assumir que uma UI React pode ser embutida diretamente no jogo sem nova integração.
 - Manter UX de teclado/controle, acessibilidade funcional, foco e feedback de erro. Não criar controles sem ação real.
 - Não remover funções pouco visíveis (logs, atualizações, opções avançadas, backups) só por simplificação estética.
 - O `.gitignore` atual ignora `*.png` genericamente: qualquer novo asset necessário precisa de exceção explícita e licença verificada; nunca fazer `git add -f` indiscriminado.
@@ -62,4 +68,77 @@ Não criar múltiplos arquivos Markdown de estado concorrentes. A referência pe
 - A fonte de verdade de PASS/FAIL deve ser processo determinístico (testes, análise estática, build, inspeção de artefatos), executável também fora do agente e, quando possível, em CI.
 - Hooks são complementares, não substitutos de CI. No ZCode atual, hooks declarados no `<workspace>/.zcode/config.json` não são executados. Para eventos automáticos, usar configuração de usuário ou plugin com suporte documentado, validar disparos reais e evitar loops de Stop Hook.
 - Subagentes podem pesquisar e revisar de forma independente; a aprovação final exige resultados reproduzíveis, nunca um simples "parece correto" de outro LLM.
-- Sempre terminar cada tarefa com: `BASELINE`, `CHANGES`, `TESTS (PASS/FAIL/SKIP/BLOCKED)`, `REGRESSIONS`, `RISKS`, `NEXT`. Nenhum PASS sem log ou comando correspondente.
+- Sempre terminar cada tarefa com o **ZCODE FINAL REPORT CONTRACT** (seção abaixo). Nenhum PASS sem log ou comando correspondente.
+
+## ZCODE FINAL REPORT CONTRACT (política obrigatória e permanente)
+
+Toda resposta final de tarefa (concluída, interrompida ou bloqueada) conterá **exclusivamente um relatório técnico completo dentro de UM ÚNICO bloco de código** com identificador `text`. Nada além de espaços/quebras de linha pode existir fora do bloco: sem introduções, sínteses, explicações, listas, tabelas ou conclusões externas.
+
+O relatório deve ser **autossuficiente**: quem receber somente o seu conteúdo precisa conseguir reconstruir o que foi feito, o que foi testado, o que falhou e quais evidências sustentam cada resultado.
+
+O formato obrigatório é:
+
+```text
+╔══════════════════════════════════════════╗
+║           GOW3 — ZCODE REPORT            ║
+╚══════════════════════════════════════════╝
+
+TASK
+  Name:        <tarefa>
+  Status:      <COMPLETED | BLOCKED | FAILED>
+
+GIT
+  Branch:      <branch>
+  Commit:      <hash>
+  Remote:      <SYNCED | LOCAL_ONLY | ERROR>
+
+BASELINE
+  Status:      <PASS | FAIL | NOT_RUN>
+  Reference:   <commit de referência>
+
+CHANGES
+  Added:       <quantidade>
+  Modified:    <quantidade>
+  Removed:     <quantidade>
+  Files:       <arquivos alterados>
+
+VALIDATION
+  Python:      <PASS / FAIL / ERROR / SKIP>
+  Native:      <PASS / FAIL / BLOCKED>
+  Build:       <PASS | FAIL | NOT_RUN>
+  Package:     <PASS | FAIL | NOT_RUN>
+  UI:          <PASS | FAIL | NOT_RUN>
+  Runtime:     <PASS | FAIL | NOT_RUN>
+
+AUDIT GATE
+  Result:      <PASS | FAIL | BLOCKED>
+  Regressions: <quantidade comprovada>
+  Evidence:    <logs e caminhos verificáveis>
+
+RISKS
+  <problemas pendentes ou NONE>
+
+FINAL STATUS
+  <READY_FOR_REVIEW | BLOCKED | FAILED>
+
+NEXT
+  <próxima ação objetiva>
+```
+
+Regras do relatório:
+- O bloco `text` é o conteúdo EXCLUSIVO da resposta final; qualquer texto fora dele (antes ou depois) invalida o relatório (validado pelo Stop hook).
+- Um único bloco `text`: blocos duplicados ou ausentes invalidam.
+- Sempre apresentar o relatório, inclusive quando a tarefa falhar.
+- Não inventar números, logs ou resultados; nunca declarar PASS sem evidência real executada.
+- Não esconder falhas anteriores nem testes ignorados; distinguir regressões de problemas preexistentes.
+- Informar explicitamente o que NÃO foi executado (build, CI, integração com o host).
+- Não declarar aprovação do usuário sem confirmação.
+- Manter exatamente o mesmo padrão entre tarefas.
+
+Conteúdo técnico aprofundado (dentro das seções fixas):
+- GIT: branch, SHA COMPLETO, referência de comparação (merge-base/ref) e estado do remoto (sync/local-only).
+- CHANGES: cada arquivo modificado com a finalidade da alteração; problemas identificados, causa raiz e solução implementada.
+- VALIDATION e AUDIT GATE: comandos executados, contagens, resultados e exit codes; separação EXPLÍCITA entre validação local, CI remoto e integração com o ZCode.
+- Evidências reproduzíveis: caminhos de logs, links de commits/PRs/runs do GitHub Actions, IDs de runs e jobs; resultado do Audit Gate com violações, exceções aplicadas, arquivos inspecionados e referência confiável usada.
+- RISKS: limitações, riscos, pendências e operações deliberadamente não executadas.
+- NEXT: próxima ação técnica necessária, concreta.

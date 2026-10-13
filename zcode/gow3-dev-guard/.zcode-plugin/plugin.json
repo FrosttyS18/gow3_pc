@@ -1,0 +1,9 @@
+{
+  "name": "gow3-dev-guard",
+  "version": "0.6.1",
+  "description": "Two-layer deterministic guardrails for the gow3_pc fork: PreToolUse blocks dangerous operations before execution (fail-closed, cd-tracking, git staged/worktree inspection); the trusted-source Audit Gate (audit_gate.py, CLI+CI via hardened pull_request_target — eligible required check, PR head as data only) verifies the repository's real changes against a trusted reference with unconditional proprietary checks, security surfaces (.github/workflows, zcode/) requiring maintainer approval records on the trusted ref, and blob-proven upstream exceptions (windows-v2.1.7 @ b907d8a9); Stop validates the GOW3 ZCODE FINAL REPORT; SessionStart injects context.",
+  "author": {
+    "name": "FrosttyS18/gow3_pc"
+  },
+  "license": "GPL-2.0-or-later"
+}

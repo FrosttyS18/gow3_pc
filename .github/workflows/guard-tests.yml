@@ -1,0 +1,33 @@
+name: guard-tests
+
+# FUNCTIONAL tests of the pull request branch, isolated and unprivileged: a plain
+# pull_request event runs in the PR's merge-ref context with a read-only token, so PR
+# code may execute here but gets no repository secrets and cannot approve itself — the
+# approval verdict comes from the separate trusted workflow (guard-audit.yml).
+# (test_audit_gate.py exercises the gate with disposable repositories only.)
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: guard + gate test suites
+    runs-on: windows-latest
+    steps:
+      - name: Checkout the PR merge ref
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: PreToolUse hooks — simulated-event suite (test_guard.py)
+        run: python zcode/gow3-dev-guard/tests/test_guard.py -v
+
+      - name: Audit gate — disposable-repository suite (test_audit_gate.py)
+        run: python zcode/gow3-dev-guard/tests/test_audit_gate.py -v
