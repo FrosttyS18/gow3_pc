@@ -42,10 +42,14 @@ launcher/gow3_launcher_win.py (Tkinter, ~1.7k linhas)
 
 ### 1.3 Sistema de patches e validação do executável
 
-- Whitelist `scripts/patches.py::GAMES`: apenas `CUSA01623`, versão `01.02`, eboot SHA-256
-  `d85c8135d330c3b601bf5dc3f1dd86bd6119fb8a9fce372bed2c9785f9a79299`. Build "full 01.02 update"
-  (hash `6e72330e…`) é reconhecido e roda **sem patches** (mensagem específica no launcher).
-- `GOW3_FORCE_PATCHES` ignora a checagem (proibido usar/agregar em UI nova).
+- Contrato **v2.1.8 (por assinatura)**: `scripts/patches.py::GAMES` registra os títulos
+  `{CUSA01623, CUSA01715, CUSA01720}` (AppVer de metadados `01.02`); cada site de patch é
+  localizado pelas linhas `Pattern`/`At` do XML em qualquer build cujo código corresponda —
+  o SHA-256 do eboot **não** restringe mais a aplicação (o caso especial do "full 01.02 update"
+  `6e72330e…` foi absorvido: seus sites têm assinaturas comprovadas,
+  `tests/data/eboot_6e72_sites.json` + `tools/make_signatures.py`).
+- `REFERENCE_SHA256` (`d85c8135…`) documenta o build de referência para os valores `Address`
+  internos e patches de terceiros; `GOW3_FORCE_PATCHES` continua proibido usar/agregar em UI nova.
 - Somente writes literais (bytes/bytes16/32/64/float/utf); patches "mask" rejeitados; endereços
   validados contra os segmentos PT_LOAD do eboot (`out/eboot.elf`); base fixa `0x400000`.
 - Patches de resolução e frame-rate derivam de `gow3.ini` (`graphics_options.py`), não da lista manual;
@@ -265,3 +269,62 @@ O projeto de UI tem **exatamente dois objetivos**:
 Implementação continua **dependendo de aprovação posterior**. Esta branch contém apenas
 documentação; nenhum código funcional foi alterado.
 
+
+
+---
+
+## 5. Re-baseline pós-upstream windows-v2.1.8 (2026-10-13)
+
+Branch `chore/upstream-windows-v2.1.8` (merge de `bb74e41c` sobre `main@997dab2`, árvore
+upstream blob-idêntica; exceção `zcode/upstream-exceptions/windows-v2.1.8.json` com 65 arquivos
+comprovados contra o commit oficial). Mesma máquina/ambiente da seção 2. Logs: `/c/gow3/*.log`
+(`build-v218.log`, `native-build-v218.log`, `native-runs-v218.log`, `pytests-v218.log`,
+`pytests-v218-verbose.log`, `package-v218.log`).
+
+### 5.1 Build e artefatos
+
+`bash build.sh` → **PASS** (exit 0). `out/gow3-probe.exe` 137.794.048 B (+1,2 MB vs baseline:
+ISA rewrite/CPU check/MSAA/GPU paths), `gow3-gpu-capabilities.exe` 285.696 B, `gow3-play.exe`
+149.504 B. Avisos CMake idênticos aos preexistentes.
+
+### 5.2 Testes nativos (43 alvos; 10 novos da v2.1.8)
+
+- **37 PASS** — inclui os 10 novos (`amd-paths`, `cpu-check`, `isa-emulate`, `isa-stub`
+  (argv `tests/data/isa_fixture.bin`), `lighting-test-knob`, `no-msaa`, `pass-census`,
+  `signatures`, `tsc-clock`, `wave-stats`) e **`cheat-hooks-test` agora PASSA** (segfault
+  determinístico da baseline §3.2 corrigido pelo upstream).
+- **1 FAIL preexistente**: `async-pipeline-cache-test` (assert `vkCreateInstance`; exige
+  dispositivo Vulkan — idêntico à baseline).
+- **5 BUILD-BLOCKED preexistentes**: `motion-shader`, `scene-resolution`, `taa-shader`,
+  `camera-motion`, `upscaler-support` (shim WIN32 `sigjmp_buf`/`setenv` ausente — gap upstream).
+- Nota de método: `timeout 60 ./x.exe` no Git Bash retornou 127 espúrio para 3 exes que passam
+  ao rodar diretamente (`orb-multiplier`, `pipeline-binary-cache`, `async-pipeline-cache` tem
+  FAIL real com assert impresso); rodar direto é o método válido.
+
+### 5.3 Testes Python (`python -m unittest discover -s tests`)
+
+`Ran 211 tests — FAILED (failures=2, errors=3, skipped=50)` → **156 PASS** (87 testes novos
+vs baseline de 124). Módulos novos 100% OK: `test_launcher_desktop` (5), `test_launcher_font`
+(9), `test_launcher_game_files`/Sc0 (2), `test_launcher_no_msaa` (8), `test_launcher_run_log`
+(6), `test_launcher_stdio` (2), `test_steam_shortcut` (12), `test_run_isa` (4), `test_link_modules`
+(1); `test_isa_rewrite` 21/21 OK com `pip install iced-x86` (17 skips sem o pacote).
+Falhas classificadas: 3 preexistentes (§3.3: symlink `test_mods`/`test_packaged_vulkan`, Nix)
++ **2 novas de plataforma do upstream** (`test_game_update`: fusão de pastas via junction e
+  `WinError 145` no `remove_view` — sem privilégio de symlink no Windows; código
+  blob-idêntico ao oficial, reproduziria igual na árvore upstream nesta máquina) — não são
+  regressões da integração. Skips: 15 probe-.exe, 14 artefatos `--test` Linux, 2 `GOW3_GAME`,
+  17 iced-x86 (convertidos em PASS acima), 2 demais.
+
+### 5.4 Empacotamento
+
+`env USER=adcka bash packaging/windows/package.sh` → **PASS** (exit 0);
+`dist/gow3-windows.zip` 76.996.051 B (74 MB, vs 66 MB da baseline; `God of War III.exe`
+launcher v2.1.8 via PyInstaller 6.22.3; checagem de arquivos proibidos OK).
+
+### 5.5 Cobertura das novidades v2.1.8
+
+CPU/ISA (`cpu-check`, `isa-emulate`, `isa-stub`, `test_isa_rewrite`, `test_run_isa`) ·
+multisampling automático (`no-msaa`, `test_launcher_no_msaa`) · seleção de GPU
+(`amd-paths`, `vk_amd_paths.h`) · Sc0 (`test_launcher_game_files`) · logs de execução
+(`test_launcher_run_log`) · Steam (`test_steam_shortcut`) · patches por assinatura
+(`signatures`, `test_patches` 13 OK; `REFERENCE_SHA256` apenas de referência).

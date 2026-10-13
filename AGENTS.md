@@ -39,8 +39,8 @@ Leia os arquivos reais antes de afirmar contratos ou propor mudanças. Não trat
 10. **Respeitar GPL-2.0 ou posterior e licenças de dependências.** Não incorporar artes proprietárias em builds redistribuídos sem autorização.
 
 ## Contratos que precisam sobreviver a qualquer redesign
-- Reconhecimento de pasta com `eboot.bin`, `sce_module` e `sce_sys/param.sfo`, ID `CUSA01623`, versão `01.02`.
-- Seleção segura de patches: os patches de 120/240 FPS existentes exigem o executável validado, SHA-256 `d85c8135d330c3b601bf5dc3f1dd86bd6119fb8a9fce372bed2c9785f9a79299`. Não alterar a whitelist nem forçar execução em outro binário.
+- Reconhecimento de pasta com `eboot.bin`, `sce_module` e `sce_sys/param.sfo`; títulos `CUSA01623`/`CUSA01715`/`CUSA01720`, versão de metadados `01.02` (título "God of War III" também reconhece releases sob outro ID listado).
+- Seleção segura de patches (contrato v2.1.8, por assinatura): cada site é localizado pelas linhas `Pattern`/`At` do XML em QUALQUER build cujo código corresponda — o hash do eboot não é mais restrição de aplicação. `REFERENCE_SHA256` (`d85c8135…`) apenas documenta o build para o qual os valores `Address` internos e os patches de terceiros foram escritos. Não remover as assinaturas, não forçar execução com `GOW3_FORCE_PATCHES` nem dispensar a validação de segmentos.
 - Paridade funcional do launcher: Play/Play direto, Display, Performance, Game, Patches, Mods, Controls, Advanced, Log, seleção de pastas, backups, idiomas, tratamento de erros e atualização.
 - Persistência compatível com os formatos existentes: `gow3.ini`, `%APPDATA%/gow3-launcher/settings.json` e arquivos dentro de `user/`. Nada de perder configurações/saves em uma troca de UI.
 - Diálogos in-game: seleção de save, "New save", imagem de cada slot, foco, cancelar/confirmar, teclado, D-pad e botões de controle, mapeamento de resultado PS4. Preservar backend; mudar o desenho somente quando esse escopo for aprovado.
