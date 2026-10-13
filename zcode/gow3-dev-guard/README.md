@@ -17,7 +17,7 @@ de bootstrap corrigido. 30 testes do Audit Gate.## Componentes
 | `hooks/guard_common.py` | Políticas compartilhadas (camada 1) |
 | `hooks/{pre_tool_use,stop_guard,session_context}.py` | Hooks |
 | `tools/audit_gate.py` | **Audit Gate** (camada 2) — diff real vs referência, escopo, submódulos, anti-autoenfraquecimento; exit 0/1/2 |
-| `tests/test_guard.py` | 90 testes de eventos simulados (camada 1) |
+| `tests/test_guard.py` | 95 testes de eventos simulados (camada 1) |
 | `tests/test_audit_gate.py` | 13 testes com repositórios descartáveis (camada 2) |
 | `.github/workflows/guard-audit.yml` | CI: suíte do guard + audit gate em PRs contra `main` |
 
@@ -59,7 +59,7 @@ sobrescreve o registro apenas para testes/manutenção (o CI confiável nunca o 
 ## CI e proteção da main (v0.6.0)
 
 - `guard-tests.yml` — evento `pull_request` (não privilegiado, `contents: read`):
-  `test_guard.py` (90) e `test_audit_gate.py` (30) no merge ref do PR.
+  `test_guard.py` (95) e `test_audit_gate.py` (30) no merge ref do PR.
 - `guard-audit.yml` — evento **`pull_request_target`** (branches: main): a versão do
   workflow executada é a do **branch base** (documento oficial), e o check anexa-se ao
   PR — **elegível como required status check** (motivo da troca: checks de `workflow_run`
@@ -134,7 +134,7 @@ Mensagens de bloqueio sempre com motivo e caminho.
 ## Testes e evidências
 
 ```
-python zcode/gow3-dev-guard/tests/test_guard.py -v        # 90 testes (camada 1)
+python zcode/gow3-dev-guard/tests/test_guard.py -v        # 95 testes (camada 1)
 python zcode/gow3-dev-guard/tests/test_audit_gate.py -v   # 30 testes (camada 2, fixtures)
 ```
 
