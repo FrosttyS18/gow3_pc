@@ -62,11 +62,16 @@ jobs:
         shell: bash
         run: |
           set +e
+          gate=zcode/gow3-dev-guard/tools/audit_gate.py
+          if [ ! -f "$gate" ]; then
+            echo "::notice::bootstrap — the audit gate is not on the protected base yet; this PR ships it. Trusted-source (maintainer) review required."
+            exit 3
+          fi
           args=(--ref origin/main --head "${{ github.event.pull_request.head.sha }}")
           for f in exceptions/*.json; do
             [ -e "$f" ] && args+=(--upstream-exception "$f")
           done
-          python zcode/gow3-dev-guard/tools/audit_gate.py "${args[@]}"
+          python "$gate" "${args[@]}"
           rc=$?
           if [ "$rc" -eq 3 ]; then
             echo "::notice::gate exit 3: security files changed — trusted-source (maintainer) review required"

@@ -471,7 +471,9 @@ class AuditRegressions(unittest.TestCase):
         self.assertEqual(bash("rm -rf 'D:\\games\\dump\\eboot.bin'")[0], BLOCK)
 
     def test_rmrf_ancestor_of_repo_blocked(self):
-        self.assertEqual(bash("rm -rf C:/gow3")[0], BLOCK)
+        # the repository's parent is an ancestor of it on any machine (D:\a\... on CI,
+        # C:\gow3 locally) — never a hardcoded absolute path
+        self.assertEqual(bash(f"rm -rf {REPO.parent}")[0], BLOCK)
 
     def test_rmrf_inside_repo_needs_authorized_target(self):
         self.assertEqual(bash("rm -rf zcode")[0], BLOCK)
