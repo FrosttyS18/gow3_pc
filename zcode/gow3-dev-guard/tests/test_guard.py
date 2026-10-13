@@ -656,5 +656,75 @@ class AuditRegressionsStop(unittest.TestCase):
         self.assertEqual(rc, PASS)
 
 
+class IntegrityPreToolUse(unittest.TestCase):
+    """The six gaps demonstrated by the re-audit of 20250d1. Written first (red step)."""
+
+    def test_applypatch_move_to_protected(self):
+        payload = {"tool_name": "ApplyPatch", "tool_input": {
+            "patch": "*** Begin Patch\n*** Update File: docs/a.md\n@@\n-x\n+y\n"
+                     "*** Move to: src/runtime_services.c\n*** End Patch"}}
+        rc, err, _ = run_hook("pre_tool_use.py", payload)
+        self.assertEqual(rc, BLOCK)
+        self.assertIn("src/runtime_services.c", err)
+
+    def test_bash_cd_before_write(self):
+        self.assertEqual(bash("cd src && echo x > runtime_services.c")[0], BLOCK)
+        self.assertEqual(bash("cd gpu && rm -rf shadps4")[0], BLOCK)
+        self.assertEqual(bash("cd docs && echo x > notes.md")[0], PASS)
+        self.assertEqual(bash("cd out && echo done > build.log")[0], PASS)
+
+    def test_bash_write_while_on_main(self):
+        repo = temp_repo(default_branch="main")
+        try:
+            (repo / "launcher").mkdir()
+            (repo / "launcher" / "x.py").write_text("x", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "launcher"],
+                           capture_output=True, timeout=30)
+            subprocess.run(["git", "-C", str(repo), "commit", "-m", "base"],
+                           capture_output=True, timeout=30)
+            rc, _, _ = bash("echo generated > launcher/new.py", project=str(repo))
+            self.assertEqual(rc, BLOCK)
+            subprocess.run(["git", "-C", str(repo), "checkout", "-b", "feat/ui"],
+                           capture_output=True, timeout=30)
+            rc, _, _ = bash("echo generated > launcher/new.py", project=str(repo))
+            self.assertEqual(rc, PASS)
+        finally:
+            subprocess.run(["rm", "-rf", str(repo)], capture_output=True)
+
+    def test_git_commit_all_with_protected_worktree_changes(self):
+        repo = temp_repo()
+        try:
+            (repo / "src").mkdir()
+            (repo / "src" / "engine.c").write_text("int x;\n", encoding="utf-8")
+            (repo / "launcher").mkdir()
+            (repo / "launcher" / "x.py").write_text("x = 1\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "."], capture_output=True, timeout=30)
+            subprocess.run(["git", "-C", str(repo), "commit", "-m", "base"],
+                           capture_output=True, timeout=30)
+            # protected tracked file modified but NOT staged
+            (repo / "src" / "engine.c").write_text("int y;\n", encoding="utf-8")
+            for command in ("git commit -am x", "git commit -a -m x",
+                            "git commit --all -m x"):
+                self.assertEqual(bash(command, project=str(repo))[0], BLOCK, command)
+            # allowed tracked file modified: -a commit passes
+            (repo / "src" / "engine.c").write_text("int x;\n", encoding="utf-8")
+            (repo / "launcher" / "x.py").write_text("x = 2\n", encoding="utf-8")
+            self.assertEqual(bash("git commit -am x", project=str(repo))[0], PASS)
+        finally:
+            subprocess.run(["rm", "-rf", str(repo)], capture_output=True)
+
+    def test_git_dash_c_push_main_and_force(self):
+        self.assertEqual(bash("git -C /c/somewhere push origin main")[0], BLOCK)
+        self.assertEqual(bash("git -C /c/somewhere push --force origin feat/x")[0], BLOCK)
+        self.assertEqual(bash("git -C /c/somewhere push origin feat/x")[0], PASS)
+
+    def test_unresolvable_write_destinations_block(self):
+        self.assertEqual(bash("echo x > $OUT/probe.c")[0], BLOCK)
+        self.assertEqual(bash("cp a.out $(pwd)/src/b.h")[0], BLOCK)
+        self.assertEqual(bash("echo hi > `mktemp -d`/x.log")[0], BLOCK)
+        # a real, resolvable environment variable is still allowed
+        self.assertEqual(bash("echo hi > $TEMP/gow3-guard-check.log")[0], PASS)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

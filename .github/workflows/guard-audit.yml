@@ -1,0 +1,39 @@
+name: guard-audit
+
+# Layer 2 of the gow3-dev-guard harness: the deterministic Audit Gate plus the guard's
+# simulated-event suite, run on every pull request targeting main (and on demand).
+# Proposed main protection (to be enabled by the maintainer in GitHub settings):
+#   - require the "guard-audit" check to pass before merge
+#   - require pull request reviews before merging
+#   - forbid force-pushes and deletions of main
+# Upstream integration exceptions must be explicit per PR via --allow-path arguments in
+# a commit that states the approved tag/commit — never a blanket switch.
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: guard hooks + audit gate
+    runs-on: windows-latest
+    steps:
+      - name: Checkout (full history for the diff against origin/main)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Guard hooks — simulated-event suite
+        run: python zcode/gow3-dev-guard/tests/test_guard.py -v
+
+      - name: Audit gate — real repository changes vs origin/main
+        run: python zcode/gow3-dev-guard/tools/audit_gate.py --ref origin/main

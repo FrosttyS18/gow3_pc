@@ -173,7 +173,7 @@ def resolve_token(token: str, base: Path) -> Path:
 # --------------------------------------------------------------------------------------------
 # Audit item 1 — destructive deletes with resolved, normalized paths.
 
-_RMRF_CMD = re.compile(r"(?:^|[;&|]\s*|\bsudo\s+)rm\s+(?:-{1,2}[a-zA-Z]*[rf][a-zA-Z]*\s+)+",
+_RMRF_CMD = re.compile(r"(?:^\s*|[;&|]\s*|\bsudo\s+)rm\s+(?:-{1,2}[a-zA-Z]*[rf][a-zA-Z]*\s+)+",
                        re.IGNORECASE)
 
 
@@ -292,32 +292,26 @@ def _segment_targets(segment: str) -> list[str]:
     return candidates
 
 
-def bash_target_violation(command: str, cwd: Path, root: Path) -> str | None:
-    """Direct write operators whose destination resolves into protected/proprietary paths,
-    or a PowerShell write cmdlet whose destination cannot be verified (fail-closed)."""
-    for segment in re.split(r"[;&|]", command):
-        for token in _segment_targets(segment):
-            path = resolve_token(token, cwd)
-            reason = write_violation(repo_rel(path, root), str(path))
-            if reason:
-                return f"bash writes to {reason}"
-
-    if _PS_EXEC.search(command) and _PS_WRITE.search(command):
-        ps_targets: list[str] = []
-        for match in _PS_PATH_FLAG.finditer(command):
-            ps_targets.append(next(group for group in match.groups() if group is not None))
-        for pair in re.findall(r"'([^']+)'|\"([^\"]+)\"", command):
-            value = next((group for group in pair if group), None)
-            if value:
-                ps_targets.append(value)
-        if not ps_targets or any(_UNRESOLVABLE.search(token) for token in ps_targets):
-            return ("PowerShell write cmdlet without a verifiable destination "
-                    "(fail-closed); write with the Edit/Write tools instead")
-        for token in ps_targets:
-            path = resolve_token(token, cwd)
-            reason = write_violation(repo_rel(path, root), str(path))
-            if reason:
-                return f"PowerShell writes to {reason}"
+def _powershell_violation(command: str, cwd: Path, root: Path) -> str | None:
+    """A PowerShell write cmdlet must name a verifiable destination (fail-closed) and the
+    destination must not be protected."""
+    if not (_PS_EXEC.search(command) and _PS_WRITE.search(command)):
+        return None
+    ps_targets: list[str] = []
+    for match in _PS_PATH_FLAG.finditer(command):
+        ps_targets.append(next(group for group in match.groups() if group is not None))
+    for pair in re.findall(r"'([^']+)'|\"([^\"]+)\"", command):
+        value = next((group for group in pair if group), None)
+        if value:
+            ps_targets.append(value)
+    if not ps_targets or any(_UNRESOLVABLE.search(token) for token in ps_targets):
+        return ("PowerShell write cmdlet without a verifiable destination "
+                "(fail-closed); write with the Edit/Write tools instead")
+    for token in ps_targets:
+        path = resolve_token(token, cwd)
+        reason = write_violation(repo_rel(path, root), str(path))
+        if reason:
+            return f"PowerShell writes to {reason}"
     return None
 
 
@@ -349,6 +343,20 @@ def staged_violation(root: Path) -> str | None:
         reason = write_violation(name.replace("\\", "/"), name)
         if reason:
             return f"git commit would persist {reason}"
+    return None
+
+
+def worktree_violation(root: Path) -> str | None:
+    """Tracked files modified but not staged — what `git commit -a/--all` would commit."""
+    done = _git(root, "diff", "--name-only", "-z", "HEAD")
+    if done is None or done.returncode != 0:
+        return "cannot inspect worktree changes (git failed — fail-closed)"
+    for name in done.stdout.split("\0"):
+        if not name:
+            continue
+        reason = write_violation(name.replace("\\", "/"), name)
+        if reason:
+            return f"git commit -a would commit {reason}"
     return None
 
 
@@ -411,17 +419,27 @@ def git_violation(command: str, cwd: Path, root: Path) -> str | None:
                 return f"git rm: {reason}"
 
     if _GIT_COMMIT.search(command):
-        return staged_violation(_git_dir_of(command, cwd, root))
+        commit_dir = _git_dir_of(command, cwd, root)
+        reason = staged_violation(commit_dir)
+        if reason:
+            return reason
+        # `commit -a/-am/--all/--include` also commits tracked modifications that were
+        # never staged — inspect the worktree against HEAD too.
+        if re.search(r"(?:\s|^)(?:-am|-a\b|--all|--include)(?=\s|$)", command):
+            reason = worktree_violation(commit_dir)
+            if reason:
+                return reason
     return None
 
 
 # Declarative destructive patterns (kept from phase 1, plus worktree discards).
 _DESTRUCTIVE = [
-    (re.compile(r"git\s+push[^|;&>]*\s(--force\b|-f\b|--force-with-lease)", re.IGNORECASE),
+    (re.compile(r"git\s+(?:-C\s+\S+\s+)?push[^|;&>]*\s(--force\b|-f\b|--force-with-lease)",
+                re.IGNORECASE),
      "force-push is destructive (AGENTS.md rule 1)"),
-    (re.compile(r"git\s+push[^|;&>]*\bmain\b", re.IGNORECASE),
+    (re.compile(r"git\s+(?:-C\s+\S+\s+)?push[^|;&>]*\bmain\b", re.IGNORECASE),
      "pushing directly to main is forbidden (AGENTS.md rule 1)"),
-    (re.compile(r"git\s+(checkout|switch)\s+(-\S+\s+)*main\b", re.IGNORECASE),
+    (re.compile(r"git\s+(?:-C\s+\S+\s+)?(checkout|switch)\s+(-\S+\s+)*main\b", re.IGNORECASE),
      "switching to main is forbidden; work on feat/*, fix/* or chore/* branches"),
     (re.compile(r"git\s+reset\s+--hard", re.IGNORECASE),
      "git reset --hard is destructive (AGENTS.md rule 1)"),
@@ -445,15 +463,68 @@ _DESTRUCTIVE = [
 ]
 
 
+_CD_SEGMENT = re.compile(r"^\s*cd\s+(.+?)\s*$")
+
+
+def effective_cwds(command: str, cwd: Path) -> list[tuple[str, Path, bool]]:
+    """(segment, cwd-in-effect, cwd-unresolvable) per segment, walking `cd` commands so a
+    write after `cd <dir>` resolves against the directory the shell would be in."""
+    out: list[tuple[str, Path, bool]] = []
+    current, unresolvable = cwd, False
+    for segment in re.split(r"[;&|]", command):
+        match = _CD_SEGMENT.match(segment)
+        if match:
+            token = match.group(1).strip("\"'")
+            if token == "-":
+                unresolvable = True
+            else:
+                expanded = os.path.expandvars(os.path.expanduser(token))
+                if "$" in expanded or "`" in expanded or "$(" in token:
+                    unresolvable = True
+                else:
+                    candidate = Path(expanded)
+                    current = candidate if candidate.is_absolute() else \
+                        Path(os.path.normpath(str(current / candidate)))
+        out.append((segment, current, unresolvable))
+    return out
+
+
 def bash_violation(command: str, cwd: Path, root: Path) -> str | None:
     command = command.strip()
     for pattern, reason in _DESTRUCTIVE:
         if pattern.search(command):
             return reason
-    reason = rmrf_violation(command, cwd, root)
-    if reason:
-        return reason
-    reason = bash_target_violation(command, cwd, root)
+
+    wrote_in_repo = False
+    for segment, seg_cwd, cwd_lost in effective_cwds(command, cwd):
+        reason = rmrf_violation(segment, seg_cwd, root)
+        if reason:
+            return reason
+        for token in _segment_targets(segment):
+            expanded = os.path.expandvars(token.strip("\"'"))
+            if "$" in expanded or "`" in token or "$(" in token:
+                return (f"bash write destination {token!r} cannot be resolved safely"
+                        " (fail-closed); use an explicit path or the Edit/Write tools")
+            if cwd_lost:
+                return ("bash writes after an unresolvable `cd` cannot be verified"
+                        " (fail-closed)")
+            path = resolve_token(token, seg_cwd)
+            rel = repo_rel(path, root)
+            reason = write_violation(rel, str(path))
+            if reason:
+                return f"bash writes to {reason}"
+            wrote_in_repo = wrote_in_repo or rel is not None
+
+    if wrote_in_repo:
+        branch = git_branch(root)
+        if branch is None:
+            return ("cannot determine the current branch for a bash write inside the"
+                    " repository (fail-closed)")
+        if branch in MAIN_BRANCHES:
+            return (f"bash writes inside the repository while HEAD is on {branch}"
+                    " (AGENTS.md rule 1)")
+
+    reason = _powershell_violation(command, cwd, root)
     if reason:
         return reason
     return git_violation(command, cwd, root)
@@ -462,8 +533,9 @@ def bash_violation(command: str, cwd: Path, root: Path) -> str | None:
 # --------------------------------------------------------------------------------------------
 # Audit item 2 — extract every file a write-capable tool may touch.
 
-_APPLY_PATCH_FILE = re.compile(r"^\*\*\*\s+(?:Update|Add|Delete|Move)\s+File:\s+(\S+)",
-                               re.IGNORECASE | re.MULTILINE)
+_APPLY_PATCH_FILE = re.compile(
+    r"^\*\*\*\s+(?:(?:Update|Add|Delete)\s+File:|Move\s+to:)\s+(\S+)",
+    re.IGNORECASE | re.MULTILINE)
 _DIFF_FILE = re.compile(r"^(?:\+\+\+ b/|diff --git a/\S+ b/)(\S+)", re.MULTILINE)
 
 
