@@ -122,7 +122,7 @@ def untracked_proprietary(repo: Path) -> list[str]:
 
 
 def in_scope(posix: str) -> bool:
-    posix = posix.lstrip("./")
+    posix = posix[2:] if posix.startswith("./") else posix
     for entry in AUTHORIZED_SCOPE:
         if entry.endswith("/"):
             if posix.startswith(entry) or posix == entry[:-1]:
@@ -138,7 +138,7 @@ def path_violation(status: str, posix: str) -> str | None:
         return "harness file deleted (integrity)"
     if g.proprietary(posix):
         return "proprietary game material in the changeset (AGENTS.md rule 4)"
-    rel = posix.lstrip("./")
+    rel = posix[2:] if posix.startswith("./") else posix
     reason = g.write_violation(rel, posix)
     if reason:
         return f"protected path changed: {reason.split(':')[0]}"
@@ -240,7 +240,9 @@ def main() -> int:
         print(f"audit-gate: reference {ref!r} not found", file=sys.stderr)
         return EXIT_ERROR
 
-    allowed = {path.replace("\\", "/").lstrip("./") for path in args.allow_path}
+    allowed = {((path.replace("\\", "/"))[2:] if path.replace("\\", "/")
+                 .startswith("./") else path.replace("\\", "/"))
+                for path in args.allow_path}
     try:
         changed = changed_records(repo, ref)
     except (RuntimeError, subprocess.SubprocessError) as error:

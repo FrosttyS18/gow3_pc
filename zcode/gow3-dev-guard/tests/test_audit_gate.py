@@ -70,6 +70,11 @@ class PositiveFixtures(unittest.TestCase):
             (repo / "zcode").mkdir()
             (repo / "zcode" / "new.py").write_text("pass\n", encoding="utf-8")
             (repo / "launcher" / "x.py").write_text("x = 2\n", encoding="utf-8")
+            # dot-prefixed authorized paths must not lose their leading dot
+            (repo / ".github" / "workflows").mkdir(parents=True)
+            (repo / ".github" / "workflows" / "ci.yml").write_text("name: ci\n",
+                                                                    encoding="utf-8")
+            (repo / ".gitignore").write_text("out/\n", encoding="utf-8")
             commit_all(repo, "ui work")
             rc, out = run_gate(repo, "--ref", "main")
             self.assertEqual(rc, 0, out)
