@@ -23,3 +23,12 @@ perf.data
 mods.json
 patches.json
 !launcher/gow3.png
+
+# Cinematic launcher (M1): node/build artifacts and LICENSED local art (bg/logo/music
+# are the maintainer's Figma exports / track — never commit; copy into
+# launcher/cinematic/public/art/ locally, see launcher/cinematic/README.md)
+launcher/cinematic/node_modules/
+launcher/cinematic/dist/
+launcher/cinematic/src-tauri/target/
+launcher/cinematic/src-tauri/gen/
+launcher/cinematic/public/art/

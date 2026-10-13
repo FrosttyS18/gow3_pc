@@ -1,0 +1,25 @@
+[package]
+name = "gow3-cinematic"
+version = "0.1.0"
+description = "God of War III Remastered — cinematic launcher (M1)"
+license = "GPL-2.0-or-later"
+edition = "2021"
+
+[lib]
+name = "gow3_cinematic_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde_json = "1"
+base64 = "0.22"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+strip = true
