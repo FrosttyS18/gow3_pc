@@ -289,12 +289,28 @@ ISA rewrite/CPU check/MSAA/GPU paths), `gow3-gpu-capabilities.exe` 285.696 B, `g
 
 ### 5.2 Testes nativos (43 alvos; 10 novos da v2.1.8)
 
-- **37 PASS** — inclui os 10 novos (`amd-paths`, `cpu-check`, `isa-emulate`, `isa-stub`
+- **36 PASS** — inclui os 10 novos (`amd-paths`, `cpu-check`, `isa-emulate`, `isa-stub`
   (argv `tests/data/isa_fixture.bin`), `lighting-test-knob`, `no-msaa`, `pass-census`,
-  `signatures`, `tsc-clock`, `wave-stats`) e **`cheat-hooks-test` agora PASSA** (segfault
-  determinístico da baseline §3.2 corrigido pelo upstream).
-- **1 FAIL preexistente**: `async-pipeline-cache-test` (assert `vkCreateInstance`; exige
-  dispositivo Vulkan — idêntico à baseline).
+  `signatures`, `tsc-clock`, `wave-stats`).
+- **2 FAIL preexistentes**: `async-pipeline-cache-test` (assert `vkCreateInstance`; exige
+  dispositivo Vulkan — idêntico à baseline) e `cheat-hooks-test` (plural) — ver abaixo.
+- **CORREÇÃO da classificação anterior (2026-10-13, re-verificação solicitada pelo
+  mantenedor)**: `cheat-hooks-test` (plural) **NÃO passa** — segfault determinístico 3/3
+  (exit 139), igual à baseline §3.2; o "EXIT:0" do relatório anterior era artefato do wrapper
+  `timeout` do Git Bash (log de saída vazio). Execuções diretas: `./cheat-hooks-test.exe` →
+  Segmentation fault (3/3); `./cheat-hook-test.exe` (singular) → "PASS: live cheat hooks"
+  (3/3, exit 0). Causa-raiz comprovada por cópia instrumentada (scratch, fora do repo):
+  `tests/test_cheat_hooks.cpp` parou no commit c7d58c3 (2026-10-09, "6 hooks", tabelas
+  `offsets[]`/`expected[]` com 5 elementos p/ ids 0–4); o commit 1867ead (2026-10-12,
+  ANCESTRAL da nossa base a12d531) adicionou VERY_HARD (id 5) e DOUBLE_JUMPS (id 6) ao
+  `src/cheat_hook.h` (8 entradas) sem atualizar o teste — `offsets[hook.id]`/`expected[hook.id]`
+  leem fora dos limites para ids 5–6; o crash acontece exatamente na iteração id=5
+  (offset 0xc77ea), no `memcpy(player.data()+offset,…)` com offset-lixo (UB benigna no CI
+  Linux do upstream, determinística no Windows/clang 22). O teste singular
+  (`test_cheat_hook.cpp`, Windows, cobre exatamente os 2 hooks novos com execução ao vivo)
+  PASSA. Classificação: falha preexistente CONTÍNUA do LADO DO TESTE upstream (não do motor,
+  não da integração) — relatada para correção upstream; nenhum código de teste/motor alterado
+  aqui para fabricar PASS.
 - **5 BUILD-BLOCKED preexistentes**: `motion-shader`, `scene-resolution`, `taa-shader`,
   `camera-motion`, `upscaler-support` (shim WIN32 `sigjmp_buf`/`setenv` ausente — gap upstream).
 - Nota de método: `timeout 60 ./x.exe` no Git Bash retornou 127 espúrio para 3 exes que passam
@@ -308,11 +324,15 @@ vs baseline de 124). Módulos novos 100% OK: `test_launcher_desktop` (5), `test_
 (9), `test_launcher_game_files`/Sc0 (2), `test_launcher_no_msaa` (8), `test_launcher_run_log`
 (6), `test_launcher_stdio` (2), `test_steam_shortcut` (12), `test_run_isa` (4), `test_link_modules`
 (1); `test_isa_rewrite` 21/21 OK com `pip install iced-x86` (17 skips sem o pacote).
-Falhas classificadas: 3 preexistentes (§3.3: symlink `test_mods`/`test_packaged_vulkan`, Nix)
-+ **2 novas de plataforma do upstream** (`test_game_update`: fusão de pastas via junction e
-  `WinError 145` no `remove_view` — sem privilégio de symlink no Windows; código
-  blob-idêntico ao oficial, reproduziria igual na árvore upstream nesta máquina) — não são
-  regressões da integração. Skips: 15 probe-.exe, 14 artefatos `--test` Linux, 2 `GOW3_GAME`,
+Falhas classificadas (PRESERVADAS como falhas, por decisão do mantenedor 2026-10-13):
+3 preexistentes (§3.3: symlink `test_mods`/`test_packaged_vulkan`, Nix) + **2 novas de
+plataforma do upstream** (`test_game_update`: `test_folders_the_update_leaves_alone_are_linked_whole`
+— junction onde a fusão esperava pasta real — e `test_removing_the_view_leaves_the_dumps_whole`
+— `WinError 145` na limpeza; sem privilégio de symlink no Windows; código blob-idêntico ao
+oficial, reproduziria igual na árvore upstream nesta máquina) — não são regressões da
+integração. **A funcionalidade de atualização separada (game_update) NÃO está totalmente
+validada no Windows enquanto a criação/limpeza de junctions falhar**; nenhum dump/save real
+do usuário foi tocado (fixtures sintéticas em diretório temporário). Skips: 15 probe-.exe, 14 artefatos `--test` Linux, 2 `GOW3_GAME`,
   17 iced-x86 (convertidos em PASS acima), 2 demais.
 
 ### 5.4 Empacotamento
