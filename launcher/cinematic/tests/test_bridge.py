@@ -105,5 +105,29 @@ class PlayTests(BridgeFixture):
         self.assertIn("outcome", status)
 
 
+class ProcessLivenessTests(unittest.TestCase):
+    """pid_alive must never harm the checked process: validated with a THROWAWAY
+    subprocess (never the game)."""
+
+    def test_pid_alive_is_read_only_and_accurate(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("launcher_bridge", BRIDGE)
+        bridge = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(bridge)  # noqa: SLF001 (module load for the probe only)
+        child = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        try:
+            self.assertTrue(bridge.pid_alive(child.pid))       # alive before…
+            self.assertTrue(bridge.pid_alive(child.pid))       # …and still alive after a
+            self.assertIsNone(child.poll())                    # check (never terminated)
+        finally:
+            child.terminate()
+            child.wait(timeout=10)
+        self.assertFalse(bridge.pid_alive(child.pid))          # gone after termination
+        self.assertFalse(bridge.pid_alive(0))
+        self.assertFalse(bridge.pid_alive(-1))
+
+
 if __name__ == "__main__":
     unittest.main()

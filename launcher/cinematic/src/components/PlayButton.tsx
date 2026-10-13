@@ -1,14 +1,16 @@
 export type PlayPhase = "idle" | "preparing" | "running" | "error"
 
-const PlayIcon = () => (
-  <svg width="17" height="20" viewBox="0 0 17 20" aria-hidden="true">
-    <path d="M1 1.6v16.8c0 .9 1 1.5 1.8 1L16 11.2c.8-.5.8-1.8 0-2.3L2.8.6C2 .1 1 .7 1 1.6z"
-      fill="currentColor" />
+/** Ícone do Figma: barra vertical + seta para a direita ("|→"), à direita do texto. */
+const EnterIcon = () => (
+  <svg width="19" height="18" viewBox="0 0 19 18" aria-hidden="true">
+    <rect x="0" y="1" width="1.6" height="16" fill="currentColor" />
+    <path d="M6 9h11M12.5 4.5 17 9l-4.5 4.5"
+      stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 )
 
-/** JOGAR with the five REAL states — never decorative: unavailable comes from the
- *  game detection, preparing/running from the live run.py process, error from it. */
+/** JOGAR com os cinco estados REAIS — visual fiel ao Figma: retângulo discreto,
+ *  texto leve Title Case, seta |→; nada de pílula, borda vermelha ou caps. */
 export function PlayButton({ phase, available, error, onPlay }: {
   phase: PlayPhase
   available: boolean
@@ -17,10 +19,9 @@ export function PlayButton({ phase, available, error, onPlay }: {
 }) {
   const disabled = !available || phase === "preparing" || phase === "running"
   const label =
-    phase === "preparing" ? "PREPARANDO"
-    : phase === "running" ? "EM EXECUÇÃO"
-    : !available ? "JOGAR"
-    : "JOGAR"
+    phase === "preparing" ? "Preparando"
+    : phase === "running" ? "Em execução"
+    : "Jogar"
   const sub =
     phase === "error" ? (error || "Erro ao iniciar — ver Log")
     : !available ? "pasta do jogo não configurada"
@@ -31,10 +32,9 @@ export function PlayButton({ phase, available, error, onPlay }: {
     <div className={phase === "error" ? "play err" : "play"}>
       <button className="btn" disabled={disabled} onClick={onPlay}
         aria-label="Jogar God of War III">
-        {phase === "running"
-          ? <span className="dot" aria-hidden="true" />
-          : <PlayIcon />}
+        {phase === "running" && <span className="dot" aria-hidden="true" />}
         {label}
+        {phase !== "running" && <EnterIcon />}
       </button>
       <div className="sub">{sub}</div>
     </div>

@@ -147,6 +147,33 @@ def cmd_play() -> dict:
     return {"ok": True, "pid": process.pid, "log": str(RUN_LOG)}
 
 
+def pid_alive(pid: int) -> bool:
+    """Read-only liveness check on Windows: OpenProcess with QUERY access only and
+    GetExitCodeProcess. Never signals, never terminates — os.kill(pid, 0) on Windows
+    routes through the same API family but is documented for CTRL_* signals and
+    TerminateProcess semantics, so it is avoided on purpose."""
+    if pid <= 0:
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False
+        try:
+            code = wintypes.DWORD()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return False
+            return code.value == STILL_ACTIVE  # 259: the ambiguity window is documented
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:
+        return False
+
+
 def cmd_play_status() -> dict:
     """Cross-process liveness (the play came from a previous, already-exited bridge run):
     the PID file plus the run log; a finished run is classified by its log's tail."""
@@ -154,13 +181,7 @@ def cmd_play_status() -> dict:
         pid = int(RUN_PID.read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
         pid = 0
-    running = False
-    if pid:
-        try:
-            os.kill(pid, 0)  # signal 0 on Windows: probes liveness only
-            running = True
-        except OSError:
-            running = False
+    running = pid_alive(pid)
     tail = ""
     try:
         tail = RUN_LOG.read_text(encoding="utf-8", errors="replace")[-2000:]
