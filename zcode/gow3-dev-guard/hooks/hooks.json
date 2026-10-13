@@ -1,0 +1,44 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "process",
+            "command": "python",
+            "args": ["${ZCODE_PLUGIN_ROOT}/hooks/session_context.py"],
+            "timeoutMs": 10000,
+            "statusMessage": "gow3-dev-guard: carregando contexto da sessão"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Edit|Write|ApplyPatch",
+        "hooks": [
+          {
+            "type": "process",
+            "command": "python",
+            "args": ["${ZCODE_PLUGIN_ROOT}/hooks/pre_tool_use.py"],
+            "timeoutMs": 15000,
+            "statusMessage": "gow3-dev-guard: verificando operação"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "process",
+            "command": "python",
+            "args": ["${ZCODE_PLUGIN_ROOT}/hooks/stop_guard.py"],
+            "timeoutMs": 15000,
+            "statusMessage": "gow3-dev-guard: validando relatório final"
+          }
+        ]
+      }
+    ]
+  }
+}

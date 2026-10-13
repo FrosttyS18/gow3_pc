@@ -1,0 +1,14 @@
+{
+  "name": "gow3-local",
+  "description": "Local marketplace of the FrosttyS18/gow3_pc fork: deterministic safety and audit harness for ZCode agents.",
+  "plugins": [
+    {
+      "name": "gow3-dev-guard",
+      "source": "./gow3-dev-guard",
+      "description": "Deterministic guardrails for gow3_pc: blocks destructive git/shell operations, direct main changes, writes to the game engine (runtime, shadPS4, patch whitelist, scripts) and proprietary game files; validates the GOW3 ZCODE FINAL REPORT on Stop; injects session context on SessionStart.",
+      "version": "0.1.0",
+      "author": { "name": "FrosttyS18/gow3_pc" },
+      "license": "GPL-2.0-or-later"
+    }
+  ]
+}
