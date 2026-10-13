@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -554,7 +555,7 @@ class AuditRegressions(unittest.TestCase):
             (repo / "launcher" / "x.py").write_text("x", encoding="utf-8")
             self.assertEqual(bash("git add launcher/x.py", project=str(repo))[0], PASS)
         finally:
-            subprocess.run(["rm", "-rf", str(repo)], capture_output=True)
+            shutil.rmtree(repo, ignore_errors=True)
 
     def test_git_commit_staged_protected_blocked(self):
         repo = temp_repo()
@@ -566,7 +567,7 @@ class AuditRegressions(unittest.TestCase):
             self.assertEqual(bash("git commit -m x", project=str(repo))[0], BLOCK)
             self.assertEqual(bash(f"git -C {repo} commit -m x", project=str(repo))[0], BLOCK)
         finally:
-            subprocess.run(["rm", "-rf", str(repo)], capture_output=True)
+            shutil.rmtree(repo, ignore_errors=True)
 
     def test_git_commit_staged_safe_allowed(self):
         repo = temp_repo()
@@ -577,7 +578,7 @@ class AuditRegressions(unittest.TestCase):
                            capture_output=True, timeout=30)
             self.assertEqual(bash("git commit -m x", project=str(repo))[0], PASS)
         finally:
-            subprocess.run(["rm", "-rf", str(repo)], capture_output=True)
+            shutil.rmtree(repo, ignore_errors=True)
 
     def test_git_commit_branch_unknown_blocks(self):
         with tempfile.TemporaryDirectory() as tmp:  # not a git repository at all
@@ -689,7 +690,7 @@ class IntegrityPreToolUse(unittest.TestCase):
             rc, _, _ = bash("echo generated > launcher/new.py", project=str(repo))
             self.assertEqual(rc, PASS)
         finally:
-            subprocess.run(["rm", "-rf", str(repo)], capture_output=True)
+            shutil.rmtree(repo, ignore_errors=True)
 
     def test_git_commit_all_with_protected_worktree_changes(self):
         repo = temp_repo()
@@ -711,7 +712,7 @@ class IntegrityPreToolUse(unittest.TestCase):
             (repo / "launcher" / "x.py").write_text("x = 2\n", encoding="utf-8")
             self.assertEqual(bash("git commit -am x", project=str(repo))[0], PASS)
         finally:
-            subprocess.run(["rm", "-rf", str(repo)], capture_output=True)
+            shutil.rmtree(repo, ignore_errors=True)
 
     def test_git_dash_c_push_main_and_force(self):
         self.assertEqual(bash("git -C /c/somewhere push origin main")[0], BLOCK)

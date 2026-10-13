@@ -8,6 +8,7 @@ Run:  python zcode/gow3-dev-guard/tests/test_audit_gate.py -v
 """
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import sys
@@ -191,16 +192,6 @@ class NegativeFixtures(unittest.TestCase):
         finally:
             shutil.rmtree(repo.parent, ignore_errors=True)
 
-    def test_allow_path_exception_is_explicit(self):
-        repo = make_repo()
-        try:
-            (repo / "build.sh").write_text("#!/bin/sh\necho x\n", encoding="utf-8")
-            commit_all(repo, "build tweak")
-            rc, out = run_gate(repo, "--ref", "main", "--allow-path", "build.sh")
-            self.assertEqual(rc, 0, out)
-        finally:
-            shutil.rmtree(repo.parent, ignore_errors=True)
-
 
 class SubmoduleFixtures(unittest.TestCase):
     """Submodule content dirt (the build's patches) is fine; a pointer move is not."""
@@ -249,6 +240,191 @@ class SubmoduleFixtures(unittest.TestCase):
             rc, out = run_gate(repo, "--ref", "main")
             self.assertEqual(rc, 1, out)
             self.assertIn("gpu/third_party/fake", out)
+        finally:
+            shutil.rmtree(repo.parent, ignore_errors=True)
+
+
+class TrustBoundaryFixtures(unittest.TestCase):
+    """The trust-boundary requirements: --head (trusted, commit-to-commit) mode,
+    upstream exceptions with blob-level proof, review-required for security files,
+    allowlist expansion as weakening, CI deletion. Written first (red step)."""
+
+    REVIEW_REQUIRED = 3
+
+    def test_head_mode_detects_protected_change(self):
+        repo = make_repo()
+        try:
+            (repo / "src" / "engine.c").write_text("int y;\n", encoding="utf-8")
+            commit_all(repo, "engine tweak")
+            head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                                  capture_output=True, text=True).stdout.strip()
+            rc, out = run_gate(repo, "--ref", "main", "--head", head)
+            self.assertEqual(rc, 1, out)
+            self.assertIn("src/engine.c", out)
+        finally:
+            shutil.rmtree(repo.parent, ignore_errors=True)
+
+    def test_security_file_change_requires_trusted_review(self):
+        repo = make_repo()
+        try:
+            harness = repo / "zcode" / "gow3-dev-guard"
+            (harness / "hooks").mkdir(parents=True)
+            (harness / "hooks" / "guard_common.py").write_text(GUARD_COMMON_MINIMAL,
+                                                               encoding="utf-8")
+            (harness / "tools").mkdir()
+            (harness / "tools" / "audit_gate.py").write_text("AUTHORIZED_SCOPE = ('docs/',)\n",
+                                                             encoding="utf-8")
+            g(repo, "checkout", "main")
+            commit_all(repo, "harness on main")
+            g(repo, "checkout", "-b", "feat/gate-edit")
+            # same tables, but the verifier CODE changed — tables alone must not bless it
+            (harness / "tools" / "audit_gate.py").write_text(
+                "AUTHORIZED_SCOPE = ('docs/',)\n# innocent-looking comment\n",
+                encoding="utf-8")
+            commit_all(repo, "gate edit")
+            head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                                  capture_output=True, text=True).stdout.strip()
+            rc, out = run_gate(repo, "--ref", "main", "--head", head)
+            self.assertEqual(rc, self.REVIEW_REQUIRED, out)
+            self.assertIn("review", out.lower())
+        finally:
+            shutil.rmtree(repo.parent, ignore_errors=True)
+
+    def test_workflow_deletion_fails(self):
+        repo = make_repo()
+        try:
+            workflow = repo / ".github" / "workflows" / "guard-audit.yml"
+            workflow.parent.mkdir(parents=True)
+            g(repo, "checkout", "main")
+            workflow.write_text("name: guard-audit\n", encoding="utf-8")
+            commit_all(repo, "ci on main")
+            g(repo, "checkout", "-b", "feat/no-ci")
+            workflow.unlink()
+            commit_all(repo, "remove ci")
+            rc, out = run_gate(repo, "--ref", "main")
+            self.assertEqual(rc, 1, out)
+            self.assertIn("guard-audit.yml", out)
+        finally:
+            shutil.rmtree(repo.parent, ignore_errors=True)
+
+    def test_allowlist_expansion_needs_trusted_review(self):
+        repo = make_repo()
+        try:
+            gate = repo / "zcode" / "gow3-dev-guard" / "tools" / "audit_gate.py"
+            gate.parent.mkdir(parents=True)
+            g(repo, "checkout", "main")
+            gate.write_text("AUTHORIZED_SCOPE = ('docs/', 'launcher/')\n", encoding="utf-8")
+            commit_all(repo, "gate on main")
+            g(repo, "checkout", "-b", "feat/widen")
+            gate.write_text("AUTHORIZED_SCOPE = ('docs/', 'launcher/', 'src/')\n",
+                            encoding="utf-8")
+            commit_all(repo, "widen scope")
+            head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                                  capture_output=True, text=True).stdout.strip()
+            rc, out = run_gate(repo, "--ref", "main", "--head", head)
+            self.assertEqual(rc, self.REVIEW_REQUIRED, out)  # widening is never auto-PASS
+            self.assertIn("allowlist", out.lower())
+            self.assertIn("trusted-source review", out)
+        finally:
+            shutil.rmtree(repo.parent, ignore_errors=True)
+
+
+class UpstreamExceptionFixtures(unittest.TestCase):
+    """Exceptions only bless content PROVABLY identical to the approved upstream commit."""
+
+    def context(self):
+        outer = Path(tempfile.mkdtemp(prefix="gow3-upstream-"))
+        upstream = outer / "upstream"
+        upstream.mkdir()
+        g(upstream, "init", "-b", "main")
+        g(upstream, "config", "user.email", "t@t")
+        g(upstream, "config", "user.name", "t")
+        (upstream / "run.py").write_text("print('upstream 2.1.7')\n", encoding="utf-8")
+        commit_all(upstream, "upstream release")
+        approved = subprocess.run(["git", "-C", str(upstream), "rev-parse", "HEAD"],
+                                  capture_output=True, text=True).stdout.strip()
+        registry = outer / "registry.json"
+        registry.write_text(json.dumps({"windows-v2.1.7":
+                                        {"repo": str(upstream), "commit": approved}}),
+                            encoding="utf-8")
+        repo = make_repo()
+        return repo, upstream, registry
+
+    def exception_file(self, repo: Path, files: list[str], tag: str = "windows-v2.1.7") -> Path:
+        path = repo / "zcode" / "upstream-exception.json"
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(json.dumps({"tag": tag, "files": files}), encoding="utf-8")
+        return path
+
+    def test_matching_content_is_allowed(self):
+        repo, upstream, registry = self.context()
+        try:
+            (repo / "run.py").write_text("print('upstream 2.1.7')\n", encoding="utf-8")
+            self.exception_file(repo, ["run.py"])
+            commit_all(repo, "sync upstream")
+            rc, out = run_gate(repo, "--ref", "main", "--registry-file", str(registry),
+                               "--upstream-exception", "zcode/upstream-exception.json")
+            self.assertEqual(rc, 0, out)
+            self.assertIn("upstream exception", out.lower())
+        finally:
+            shutil.rmtree(repo.parent, ignore_errors=True)
+
+    def test_diverging_content_fails(self):
+        repo, upstream, registry = self.context()
+        try:
+            (repo / "run.py").write_text("print('tampered')\n", encoding="utf-8")
+            self.exception_file(repo, ["run.py"])
+            commit_all(repo, "fake sync")
+            rc, out = run_gate(repo, "--ref", "main", "--registry-file", str(registry),
+                               "--upstream-exception", "zcode/upstream-exception.json")
+            self.assertEqual(rc, 1, out)
+            self.assertIn("does not match", out)
+        finally:
+            shutil.rmtree(repo.parent, ignore_errors=True)
+
+    def test_proprietary_cannot_be_excepted(self):
+        repo, upstream, registry = self.context()
+        try:
+            (repo / "dump").mkdir()
+            (repo / "dump" / "eboot.bin").write_bytes(b"MZ")
+            self.exception_file(repo, ["dump/eboot.bin"])
+            commit_all(repo, "oops")
+            rc, out = run_gate(repo, "--ref", "main", "--registry-file", str(registry),
+                               "--upstream-exception", "zcode/upstream-exception.json")
+            self.assertEqual(rc, 1, out)
+            self.assertIn("eboot.bin", out)
+        finally:
+            shutil.rmtree(repo.parent, ignore_errors=True)
+
+    def test_unknown_tag_fails(self):
+        repo, upstream, registry = self.context()
+        try:
+            (repo / "run.py").write_text("print('upstream 2.1.7')\n", encoding="utf-8")
+            self.exception_file(repo, ["run.py"], tag="windows-v9.9.9")
+            commit_all(repo, "sync")
+            rc, out = run_gate(repo, "--ref", "main", "--registry-file", str(registry),
+                               "--upstream-exception", "zcode/upstream-exception.json")
+            self.assertEqual(rc, 1, out)
+            self.assertIn("windows-v9.9.9", out)
+        finally:
+            shutil.rmtree(repo.parent, ignore_errors=True)
+
+    def test_harness_cannot_be_excepted(self):
+        repo, upstream, registry = self.context()
+        try:
+            harness = repo / "zcode" / "gow3-dev-guard" / "hooks" / "guard_common.py"
+            harness.parent.mkdir(parents=True)
+            g(repo, "checkout", "main")
+            harness.write_text(GUARD_COMMON_MINIMAL, encoding="utf-8")
+            commit_all(repo, "harness on main")
+            g(repo, "checkout", "-b", "feat/sneaky")
+            harness.unlink()
+            self.exception_file(repo, ["zcode/gow3-dev-guard/hooks/guard_common.py"])
+            commit_all(repo, "except harness away")
+            rc, out = run_gate(repo, "--ref", "main", "--registry-file", str(registry),
+                               "--upstream-exception", "zcode/upstream-exception.json")
+            self.assertEqual(rc, 1, out)
+            self.assertIn("harness", out.lower())
         finally:
             shutil.rmtree(repo.parent, ignore_errors=True)
 

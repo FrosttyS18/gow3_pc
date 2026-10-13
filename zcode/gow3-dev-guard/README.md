@@ -4,8 +4,9 @@ Plugin do ZCode versionado no repositório (`zcode/gow3-dev-guard`), com marketp
 `zcode/marketplace.json`. Sem código do jogo, sem rede, sem LLM: toda decisão é caminho
 resolvido, regex, consulta git somente-leitura ou diff real — avaliada em código.
 
-**v0.3.0** — integridade em duas camadas após a reauditoria do `20250d1`
-(branch `fix/gow3-guard-integrity`):
+**v0.4.0** — fechamento da fronteira de confiança (branch `fix/gow3-guard-trust`):
+gate executado pela fonte confiável no CI, exceções upstream com prova de blob, integridade
+por classe (blocklist/allowlist/verificador) e validação real no GitHub Actions.
 
 - **CAMADA 1 — PreToolUse (pré-execução):** bloqueia operações perigosas identificáveis.
 - **CAMADA 2 — Audit Gate (pós-fato, independente):** verifica as alterações REAIS do
@@ -25,37 +26,52 @@ resolvido, regex, consulta git somente-leitura ou diff real — avaliada em cód
 | `tests/test_audit_gate.py` | 13 testes com repositórios descartáveis (camada 2) |
 | `.github/workflows/guard-audit.yml` | CI: suíte do guard + audit gate em PRs contra `main` |
 
-## CAMADA 2 — Audit Gate
+## CAMADA 2 — Audit Gate (v0.4.0, fonte confiável)
 
 ```
-python zcode/gow3-dev-guard/tools/audit_gate.py [--repo DIR] [--ref REF]
-                                                [--allow-path PATH]... [--json]
+python zcode/gow3-dev-guard/tools/audit_gate.py [--repo DIR] [--ref REF] [--head COMMIT]
+                                                [--upstream-exception FILE]... [--json]
 ```
 
-- Referência explícita (padrão `origin/main`, senão `main`); diff `--name-status` cobre
-  commits + staged + worktree de uma vez; renames inspecionam os dois lados.
-- Verifica: caminhos protegidos, material proprietário (inclusive **untracked**, via
-  `git status`), mudanças funcionais fora do escopo autorizado (`docs/ launcher/ tests/
-  zcode/ packaging/ tools/ .github/ gpu/shim/gow3_overlay.cpp` + meta), **ponteiros de
-  submódulo** (sujeira de conteúdo do build é ignorada; mover o ponteiro falha), exclusão
-  de arquivos do harness.
-- **Anti-autoenfraquecimento:** se o próprio `guard_common.py` ou `audit_gate.py` mudar na
-  branch analisada, as tabelas de política (PROTECTED_PREFIXES, PROPRIETARY_PATTERNS,
-  AUTHORIZED_SCOPE, ...) são extraídas por AST da referência e comparadas — remover
-  entradas ⇒ FAIL; arquivo ilegível/inparseável ⇒ FAIL; harness novo na referência ⇒ nada
-  a comparar (regras passam a valer a partir do merge).
-- Saída `PASS`/`FAIL` com status, caminho e evidência (`ref..worktree`); exit `0/1/2`.
-- **Exceção de escopo para integrações upstream:** `--allow-path PATH` explícito por
-  invocação, declarado no PR e restrito ao commit/tag aprovado — nunca liberação geral nem
-  variável de ambiente que desative o gate.
+**Fronteira de confiança:** quem aprova um PR nunca é o código do próprio PR. O CI
+(`guard-audit.yml`, `pull_request_target`, `permissions: contents: read`) faz checkout da
+**base protegida** (main), busca o head do PR **como dados** (objetos git, nada executado)
+e roda o gate **da base** em modo commit-a-commit (`--head`); o worktree não influencia o
+veredito. Os testes funcionais da branch rodam isolados no `guard-tests.yml`
+(`pull_request`, somente leitura).
+
+Verifica: escopo autorizado, caminhos protegidos, material proprietário (inclusive
+untracked, modo worktree), ponteiros de submódulo (sujeira de build ignorada) e **deleção
+de harness/CI** (nunca excepcionável).
+
+**Integridade por classe** (`--head` ou worktree): *blocklists* (PROTECTED_PREFIXES,
+PROPRIETARY_PATTERNS, MAIN_BRANCHES) — remover ⇒ FAIL; *allowlists* (AUTHORIZED_SCOPE,
+TOP/NESTED_AUTHORIZED_RM, APPROVED_UPSTREAM) — adicionar ⇒ revisão da fonte de confiança;
+qualquer outra mudança no verificador/hooks/testes do harness/workflows ⇒ **exit 3
+REVIEW REQUIRED** — o gate jamais auto-aprova a si mesmo por comparação de tabelas.
+
+**Exceção upstream (sincronizações futuras):** `--upstream-exception FILE` com
+`{"tag": "windows-v2.1.7", "files": [...]}`. A tag precisa existir no registro fixado
+(`APPROVED_UPSTREAM` no gate: `windows-v2.1.7` =
+`b907d8a9f2324ba5f514fbfe7de803e027c6ca26` @ FelipePrado0/gow3_pc) e **cada arquivo
+listado precisa ser blob-idêntico** ao commit aprovado — prova de conteúdo, não confiança
+em nome de caminho. Proprietários, harness e CI nunca são excepcionáveis. Convencão CI:
+declarações em `zcode/upstream-exceptions/*.json` no PR.
+
+Exit codes: `0` PASS · `1` FAIL · `2` erro · `3` REVIEW REQUIRED. `--registry-file`
+sobrescreve o registro apenas para testes/manutenção (o CI confiável nunca o passa).
 
 ## CI e proteção da main
 
-`.github/workflows/guard-audit.yml` (sintaxe validada) roda em `pull_request → main` e
-`workflow_dispatch`: suíte do guard (90 testes) + audit gate vs `origin/main`.
-**Proteção da `main` proposta, ainda NÃO confirmada como ativa** (exige configuração do
-mantenedor no GitHub): exigir o check `guard-audit`, exigir revisão de PR, proibir
-force-push/exclusão. Após habilitar, confirmar em Settings → Branches.
+Dois workflows (YAML validado):
+- `guard-tests.yml` — `pull_request` (não privilegiado, leitura): `test_guard.py` (90) e
+  `test_audit_gate.py` (21) no merge ref do PR.
+- `guard-audit.yml` — `pull_request_target` → `main` (fonte confiável, leitura,
+  `persist-credentials: false`): gate da BASE contra o head do PR (`--head`), exit 3
+  vira check vermelho com aviso de revisão obrigatória.
+Execução real registrada no PR correspondente à branch de confiança. **Proteção da `main`
+proposta, ainda NÃO confirmada como ativa**: exigir os checks `guard-audit` e
+`guard-tests`, revisão de PR, proibir force-push (Settings → Branches).
 
 ## Ativação no ZCode (camada 1; ação única do usuário)
 

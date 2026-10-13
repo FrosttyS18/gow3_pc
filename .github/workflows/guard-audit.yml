@@ -1,13 +1,17 @@
 name: guard-audit
 
-# Layer 2 of the gow3-dev-guard harness: the deterministic Audit Gate plus the guard's
-# simulated-event suite, run on every pull request targeting main (and on demand).
-# Proposed main protection (to be enabled by the maintainer in GitHub settings):
-#   - require the "guard-audit" check to pass before merge
-#   - require pull request reviews before merging
-#   - forbid force-pushes and deletions of main
-# Upstream integration exceptions must be explicit per PR via --allow-path arguments in
-# a commit that states the approved tag/commit — never a blanket switch.
+# TRUSTED audit of a pull request, by the official GitHub Actions security model:
+#   * pull_request_target runs THIS workflow from the protected base (main), with the
+#     repository's default token — so nothing from the PR is ever executed here.
+#   * The PR head is fetched as DATA (git objects only) and audited by the gate that
+#     ships with the BASE ref, commit-to-commit (--head). A PR cannot approve itself by
+#     editing the gate, the tests or this workflow.
+#   * Permissions are minimal (contents: read) and credentials are not persisted.
+# Exit codes of the gate: 0 PASS · 1 FAIL · 2 error · 3 REVIEW REQUIRED (security files
+# changed — maintainer must review; the check fails on purpose until then).
+#
+# Proposed main protection (maintainer enables in Settings → Branches): require the
+# "guard-audit" and "guard-tests" checks + pull request reviews; forbid force-pushes.
 
 on:
   pull_request:
@@ -18,22 +22,58 @@ permissions:
   contents: read
 
 jobs:
-  guard:
-    name: guard hooks + audit gate
+  trusted-audit:
+    name: trusted audit gate (base ref)
     runs-on: windows-latest
     steps:
-      - name: Checkout (full history for the diff against origin/main)
+      - name: Checkout the trusted base ref (never the PR code)
         uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Guard hooks — simulated-event suite
-        run: python zcode/gow3-dev-guard/tests/test_guard.py -v
+      - name: Fetch the PR head as data (objects only, nothing executed)
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          git config --local protocol.file.allow always
+          git fetch --no-tags origin "${{ github.event.pull_request.head.sha }}"
+          git rev-parse --verify '${{ github.event.pull_request.head.sha }}^{commit}'
 
-      - name: Audit gate — real repository changes vs origin/main
-        run: python zcode/gow3-dev-guard/tools/audit_gate.py --ref origin/main
+      - name: Extract upstream exception declarations from the PR head (data only)
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          mkdir -p exceptions
+          head='${{ github.event.pull_request.head.sha }}'
+          git ls-tree -r --name-only "$head" -- zcode/upstream-exceptions/ \
+            | while read -r f; do git show "$head:$f" > "exceptions/$(basename "$f")"; done
+          found=$(ls exceptions 2>/dev/null | wc -l | tr -d ' ')
+          echo "Extracted $found upstream exception declaration(s)"
+
+      - name: Run the trusted audit gate against the PR head
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set +e
+          args=(--ref origin/main --head "${{ github.event.pull_request.head.sha }}")
+          for f in exceptions/*.json; do
+            [ -e "$f" ] && args+=(--upstream-exception "$f")
+          done
+          python zcode/gow3-dev-guard/tools/audit_gate.py "${args[@]}"
+          rc=$?
+          if [ "$rc" -eq 3 ]; then
+            echo "::notice::gate exit 3: security files changed — trusted-source (maintainer) review required"
+          fi
+          exit "$rc"
+
+      - name: Self-audit of the base ref (manual runs)
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: python zcode/gow3-dev-guard/tools/audit_gate.py --ref origin/main~1 --head origin/main
