@@ -68,14 +68,10 @@ class PositiveFixtures(unittest.TestCase):
         repo = make_repo()
         try:
             (repo / "docs" / "a.md").write_text("docs 2\n", encoding="utf-8")
-            (repo / "zcode").mkdir()
-            (repo / "zcode" / "new.py").write_text("pass\n", encoding="utf-8")
             (repo / "launcher" / "x.py").write_text("x = 2\n", encoding="utf-8")
-            # dot-prefixed authorized paths must not lose their leading dot
-            (repo / ".github" / "workflows").mkdir(parents=True)
-            (repo / ".github" / "workflows" / "ci.yml").write_text("name: ci\n",
-                                                                    encoding="utf-8")
-            (repo / ".gitignore").write_text("out/\n", encoding="utf-8")
+            (repo / "tools").mkdir()
+            (repo / "tools" / "helper.py").write_text("pass\n", encoding="utf-8")
+            (repo / ".gitignore").write_text("out/\n", encoding="utf-8")  # dot path kept
             commit_all(repo, "ui work")
             rc, out = run_gate(repo, "--ref", "main")
             self.assertEqual(rc, 0, out)
@@ -307,6 +303,63 @@ class TrustBoundaryFixtures(unittest.TestCase):
         finally:
             shutil.rmtree(repo.parent, ignore_errors=True)
 
+    def test_new_workflow_requires_review(self):
+        repo = make_repo()
+        try:
+            workflow = repo / ".github" / "workflows" / "brand-new.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text("name: sneaky\n", encoding="utf-8")
+            commit_all(repo, "add workflow")
+            rc, out = run_gate(repo, "--ref", "main")
+            self.assertEqual(rc, self.REVIEW_REQUIRED, out)  # never an automatic PASS
+            self.assertIn(".github/workflows/brand-new.yml", out)
+        finally:
+            shutil.rmtree(repo.parent, ignore_errors=True)
+
+    def test_modifying_audit_workflow_requires_review(self):
+        repo = make_repo()
+        try:
+            workflow = repo / ".github" / "workflows" / "guard-audit.yml"
+            workflow.parent.mkdir(parents=True)
+            g(repo, "checkout", "main")
+            workflow.write_text("name: guard-audit\n", encoding="utf-8")
+            commit_all(repo, "ci on main")
+            g(repo, "checkout", "-b", "feat/ci-edit")
+            workflow.write_text("name: guard-audit\n# tweak\n", encoding="utf-8")
+            commit_all(repo, "edit ci")
+            rc, out = run_gate(repo, "--ref", "main")
+            self.assertEqual(rc, self.REVIEW_REQUIRED, out)
+            self.assertIn("guard-audit.yml", out)
+        finally:
+            shutil.rmtree(repo.parent, ignore_errors=True)
+
+    def test_approval_record_on_trusted_ref_resolves_review(self):
+        repo = make_repo()
+        try:
+            workflow = repo / ".github" / "workflows" / "new.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text("name: new\n", encoding="utf-8")
+            commit_all(repo, "add workflow")
+            head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                                  capture_output=True, text=True).stdout.strip()
+            rc, out = run_gate(repo, "--ref", "main")
+            self.assertEqual(rc, self.REVIEW_REQUIRED, out)  # unresolved first
+            # the maintainer records the approval ON THE TRUSTED REFERENCE (main),
+            # never inside the analyzed branch: a PR cannot approve itself
+            reviews = repo / "zcode" / "gow3-dev-guard" / "reviews"
+            g(repo, "checkout", "main")
+            reviews.mkdir(parents=True)
+            (reviews / "2026-10-13-new-workflow.json").write_text(json.dumps(
+                {"head_sha": head, "pr": 7, "approved_by": "maintainer",
+                 "note": "workflow reviewed"}), encoding="utf-8")
+            commit_all(repo, "record approval")
+            g(repo, "checkout", "-")  # back to the analyzed branch (same head sha)
+            rc, out = run_gate(repo, "--ref", "main")
+            self.assertEqual(rc, 0, out)
+            self.assertIn("APPROVED", out)
+        finally:
+            shutil.rmtree(repo.parent, ignore_errors=True)
+
     def test_allowlist_expansion_needs_trusted_review(self):
         repo = make_repo()
         try:
@@ -351,8 +404,8 @@ class UpstreamExceptionFixtures(unittest.TestCase):
         return repo, upstream, registry
 
     def exception_file(self, repo: Path, files: list[str], tag: str = "windows-v2.1.7") -> Path:
-        path = repo / "zcode" / "upstream-exception.json"
-        path.parent.mkdir(exist_ok=True)
+        path = repo / "zcode" / "upstream-exceptions" / "windows-v2.1.7.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({"tag": tag, "files": files}), encoding="utf-8")
         return path
 
@@ -363,7 +416,7 @@ class UpstreamExceptionFixtures(unittest.TestCase):
             self.exception_file(repo, ["run.py"])
             commit_all(repo, "sync upstream")
             rc, out = run_gate(repo, "--ref", "main", "--registry-file", str(registry),
-                               "--upstream-exception", "zcode/upstream-exception.json")
+                               "--upstream-exception", "zcode/upstream-exceptions/windows-v2.1.7.json")
             self.assertEqual(rc, 0, out)
             self.assertIn("upstream exception", out.lower())
         finally:
@@ -376,7 +429,7 @@ class UpstreamExceptionFixtures(unittest.TestCase):
             self.exception_file(repo, ["run.py"])
             commit_all(repo, "fake sync")
             rc, out = run_gate(repo, "--ref", "main", "--registry-file", str(registry),
-                               "--upstream-exception", "zcode/upstream-exception.json")
+                               "--upstream-exception", "zcode/upstream-exceptions/windows-v2.1.7.json")
             self.assertEqual(rc, 1, out)
             self.assertIn("does not match", out)
         finally:
@@ -390,7 +443,7 @@ class UpstreamExceptionFixtures(unittest.TestCase):
             self.exception_file(repo, ["dump/eboot.bin"])
             commit_all(repo, "oops")
             rc, out = run_gate(repo, "--ref", "main", "--registry-file", str(registry),
-                               "--upstream-exception", "zcode/upstream-exception.json")
+                               "--upstream-exception", "zcode/upstream-exceptions/windows-v2.1.7.json")
             self.assertEqual(rc, 1, out)
             self.assertIn("eboot.bin", out)
         finally:
@@ -403,9 +456,28 @@ class UpstreamExceptionFixtures(unittest.TestCase):
             self.exception_file(repo, ["run.py"], tag="windows-v9.9.9")
             commit_all(repo, "sync")
             rc, out = run_gate(repo, "--ref", "main", "--registry-file", str(registry),
-                               "--upstream-exception", "zcode/upstream-exception.json")
+                               "--upstream-exception", "zcode/upstream-exceptions/windows-v2.1.7.json")
             self.assertEqual(rc, 1, out)
             self.assertIn("windows-v9.9.9", out)
+        finally:
+            shutil.rmtree(repo.parent, ignore_errors=True)
+
+    def test_workflow_cannot_be_excepted(self):
+        repo, upstream, registry = self.context()
+        try:
+            workflow = repo / ".github" / "workflows" / "guard-audit.yml"
+            workflow.parent.mkdir(parents=True)
+            g(repo, "checkout", "main")
+            workflow.write_text("name: guard-audit\n", encoding="utf-8")
+            commit_all(repo, "ci on main")
+            g(repo, "checkout", "-b", "feat/ci-sneak")
+            workflow.write_text("name: guard-audit\n# changed\n", encoding="utf-8")
+            self.exception_file(repo, [".github/workflows/guard-audit.yml"])
+            commit_all(repo, "except ci away")
+            rc, out = run_gate(repo, "--ref", "main", "--registry-file", str(registry),
+                               "--upstream-exception", "zcode/upstream-exceptions/windows-v2.1.7.json")
+            self.assertEqual(rc, 1, out)
+            self.assertIn("never exceptable", out)
         finally:
             shutil.rmtree(repo.parent, ignore_errors=True)
 
@@ -422,7 +494,7 @@ class UpstreamExceptionFixtures(unittest.TestCase):
             self.exception_file(repo, ["zcode/gow3-dev-guard/hooks/guard_common.py"])
             commit_all(repo, "except harness away")
             rc, out = run_gate(repo, "--ref", "main", "--registry-file", str(registry),
-                               "--upstream-exception", "zcode/upstream-exception.json")
+                               "--upstream-exception", "zcode/upstream-exceptions/windows-v2.1.7.json")
             self.assertEqual(rc, 1, out)
             self.assertIn("harness", out.lower())
         finally:

@@ -42,6 +42,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -67,19 +68,16 @@ APPROVED_UPSTREAM = {
     },
 }
 
-SECURITY_FILES = (
-    "zcode/gow3-dev-guard/tools/audit_gate.py",
-    "zcode/gow3-dev-guard/hooks/guard_common.py",
-    "zcode/gow3-dev-guard/hooks/pre_tool_use.py",
-    "zcode/gow3-dev-guard/hooks/stop_guard.py",
-    "zcode/gow3-dev-guard/hooks/session_context.py",
-    "zcode/gow3-dev-guard/hooks/hooks.json",
-    "zcode/gow3-dev-guard/tests/test_guard.py",
-    "zcode/gow3-dev-guard/tests/test_audit_gate.py",
-    "zcode/marketplace.json",
-    ".github/workflows/guard-audit.yml",
-    ".github/workflows/guard-tests.yml",
-)
+# Security surfaces: every workflow file and the whole harness/plugin tree. Any change
+# there (add/modify/rename) requires trusted review; deletion is a hard violation; none
+# of it can be excepted. Maintainer approval records live under REVIEWS_PREFIX and are
+# read from the TRUSTED reference only — a PR can never approve itself.
+WORKFLOWS_PREFIX = ".github/workflows/"
+HARNESS_PREFIX = "zcode/"
+REVIEWS_PREFIX = "zcode/gow3-dev-guard/reviews/"
+# Exception declarations are data: their effect is bounded by the pinned registry and the
+# blob-identity proof, so they are not a security surface on their own.
+UPSTREAM_EXCEPTIONS_PREFIX = "zcode/upstream-exceptions/"
 
 # Integrity classes of the policy tables.
 BLOCKLIST_TABLES = ("PROTECTED_PREFIXES", "PROPRIETARY_PATTERNS", "MAIN_BRANCHES")
@@ -155,12 +153,28 @@ def normalize(path: str) -> str:
     return path[2:] if path.startswith("./") else path
 
 
+def is_security_path(posix: str) -> bool:
+    """Workflows and the harness/plugin tree are security surfaces. Exception
+    declarations and maintainer approval records are data, not control code."""
+    posix = normalize(posix)
+    if posix.startswith(UPSTREAM_EXCEPTIONS_PREFIX) or posix.startswith(REVIEWS_PREFIX):
+        return False
+    return posix.startswith(WORKFLOWS_PREFIX) or posix.startswith(HARNESS_PREFIX)
+
+
 def path_violation(status: str, posix: str) -> str | None:
     """The reason one changed path fails the gate (before exceptions), or None."""
-    if posix in SECURITY_FILES:
+    posix = normalize(posix)
+    if posix.startswith(REVIEWS_PREFIX) or posix.startswith(UPSTREAM_EXCEPTIONS_PREFIX):
+        return None  # maintainer approval records and exception declarations: data
+    if posix.startswith(WORKFLOWS_PREFIX):
         if status == "D":
-            return "harness file deleted (CI included) — removal can never be excepted"
-        return None  # security-file modifications are handled as REVIEW REQUIRED, not FAIL
+            return "workflow deleted — CI disablement, never exceptable"
+        return None  # workflow add/modify/rename: REVIEW REQUIRED, not auto-PASS
+    if posix.startswith(HARNESS_PREFIX):
+        if status == "D":
+            return "harness file deleted — removal can never be excepted"
+        return None  # harness add/modify: REVIEW REQUIRED (auditable protocol)
     if g.proprietary(posix):
         return "proprietary game material in the changeset (AGENTS.md rule 4)"
     reason = g.write_violation(posix, posix)
@@ -214,21 +228,19 @@ def file_at(repo: Path, ref: str, path: str) -> str | None:
 
 def self_integrity(repo: Path, ref: str, head: str | None,
                    changed: list[tuple[str, str, str | None]]) -> tuple[list[str], list[str]]:
-    """(violations, review_required): table weakening fails; any other change to the
-    verifier's own files demands trusted review."""
+    """(violations, review_required): policy-table weakening fails; every other change on
+    a security surface (workflows, harness) demands trusted review — which a maintainer
+    records under REVIEWS_PREFIX on the trusted reference (never in the PR)."""
     violations: list[str] = []
     review: list[str] = []
     changed_paths = {normalize(record[1]) for record in changed} | \
         {normalize(record[2]) for record in changed if record[2]}
-    deleted_paths = {normalize(record[1]) for record in changed if record[0] == "D"}
     for path, tables in (("zcode/gow3-dev-guard/hooks/guard_common.py",
                           BLOCKLIST_TABLES + ALLOWLIST_TABLES[1:3]),
                          ("zcode/gow3-dev-guard/tools/audit_gate.py",
                           ("AUTHORIZED_SCOPE", "APPROVED_UPSTREAM"))):
         if path not in changed_paths:
             continue
-        if path in deleted_paths:
-            continue  # deletion is already a hard violation; nothing left to compare
         reference = file_at(repo, ref, path)
         if reference is None:
             continue  # harness is new relative to the reference: nothing to weaken yet
@@ -259,15 +271,36 @@ def self_integrity(repo: Path, ref: str, head: str | None,
                     review.append(f"{path}: allowlist {table} expanded on this branch"
                                   f" (added: {', '.join(sorted(added))}) — widening"
                                   " permissions needs trusted-source review")
-        review.append(f"{path} (verifier code changed; tables compared above)")
     for record_status, path, source in changed:
         for side in (path, source or ""):
             posix = normalize(side)
-            if posix in SECURITY_FILES and record_status != "D" and posix not in \
-                    ("zcode/gow3-dev-guard/hooks/guard_common.py",
-                     "zcode/gow3-dev-guard/tools/audit_gate.py"):
-                review.append(f"{posix} (security/CI file changed)")
+            if not posix or not is_security_path(posix) or record_status == "D":
+                continue  # deletions are already hard violations
+            review.append(f"{posix} (security surface changed)")
     return violations, review
+
+
+def approved_heads(repo: Path, ref: str) -> dict[str, str]:
+    """{head_sha: record} of maintainer approval records ON THE TRUSTED REFERENCE.
+    The analyzed PR cannot inject approvals: they are read from the ref's tree only."""
+    approved: dict[str, str] = {}
+    done = git(repo, "ls-tree", "-r", "--name-only", ref, "--", REVIEWS_PREFIX)
+    if done.returncode != 0:
+        return approved
+    for name in done.stdout.splitlines():
+        if not name.endswith(".json"):
+            continue
+        content = file_at(repo, ref, name)
+        if not content:
+            continue
+        try:
+            record = json.loads(content)
+        except ValueError:
+            continue
+        sha = record.get("head_sha")
+        if isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha):
+            approved[sha] = name
+    return approved
 
 
 def load_registry(path: str | None) -> dict:
@@ -318,7 +351,7 @@ def upstream_exception_files(repo: Path, head: str | None, exception_path: str,
             problems.append(f"upstream exception for {posix}: proprietary material is"
                             " never exceptable")
             continue
-        if posix in SECURITY_FILES:
+        if is_security_path(posix):
             problems.append(f"upstream exception for {posix}: security/harness files are"
                             " never exceptable")
             continue
@@ -415,6 +448,15 @@ def main() -> int:
 
     integrity_violations, review = self_integrity(repo, resolved, head, changed)
     violations.extend(integrity_violations)
+
+    # REVIEW_REQUIRED never turns into PASS by itself: it is resolved only by a maintainer
+    # approval record that lives on the TRUSTED reference (never in the analyzed PR).
+    audited_sha = head or resolve_ref(repo, "HEAD")
+    approvals = approved_heads(repo, resolved)
+    approval_record = approvals.get(audited_sha) if audited_sha else None
+    if approval_record and review and not violations:
+        print(f"APPROVED by maintainer record {approval_record} @ {ref}")
+        review = []
 
     if violations:
         result, code = "FAIL", EXIT_FAIL
