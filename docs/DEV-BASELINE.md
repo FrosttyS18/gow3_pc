@@ -188,7 +188,17 @@ python -m unittest discover -s tests -v
 | PASS | 91 | test_patches (exceto 1), test_prepare, test_mods (exceto 1), test_save_backup, test_graphics_options, test_button_icons, test_launcher_controls, test_launcher_stream_memory, test_mod_conflicts, test_upscaler_assets, test_content (3), test_link_libc, test_runtime (1, os demais SKIP), test_packaged_vulkan (parcial) |
 | FAIL | 1 | `test_packaged_vulkan.test_host_driver_can_be_supplied_outside_hidden_nix_store` — lógica de Nix store (Linux) diverge no Windows |
 | ERROR | 2 | `test_mods.test_mod_symlinks_rejected`, `test_packaged_vulkan.test_host_nvidia_and_compiler_are_exposed_without_host_libc` — `WinError 1314`: criação de symlink exige privilégio/Modo Desenvolvedor no Windows |
-| SKIP (BLOCKED) | 30 | 15× `test_probe` ("build native probe first": espera `out/gow3-probe` sem `.exe`); 15× "run bash build.sh --test first" (`test_content` 3, `test_runtime` 7, `test_sema` 5 — binários de teste nativos do fluxo Linux); 1× `test_patches` ("GOW3_GAME not set" — exige dump real; por design não roda em CI) |
+| SKIP (BLOCKED) | 30 | 15× `test_probe` ("build native probe first": espera `out/gow3-probe` sem `.exe`); 14× "run bash build.sh --test first" (`test_content` 3 + `test_runtime` 7 + `test_sema` 4 — binários de teste nativos do fluxo Linux); 1× `test_patches` ("GOW3_GAME not set" — exige dump real; por design não roda em CI) |
+
+Auditoria da contagem (reconciliação, log `pytests-baseline.log`): o resumo do unittest
+(`Ran 124 tests … failures=1, errors=2, skipped=30`) implica 91 PASS. O log contém 124 linhas de
+cabeçalho `^test_`, 30 linhas `... skipped` (15+14+1 por motivo acima) e 3 testes nas seções
+ERROR/FAIL. Um `grep` ancorado em `... ok$` encontra apenas 85 linhas porque 6 testes que PASSAM
+(5 de `test_mods`, 1 de `test_patches.ExternalPatchTests`) escrevem stdout no meio da própria linha
+de resultado (ex. `test_wrapped_layouts … … Mods: Archive: 1 files … ok`); nenhum deles aparece nas
+seções de falha, logo são PASS: 85+6=91. Detalhamento anterior que somava 31 SKIPs era erro de
+leitura do log (incluía um PASS cujo *nome* contém "skipped" e contava `test_sema` como 5 em vez
+de 4); os números do resumo (91/1/2/30) sempre foram consistentes entre si: 91+1+2+30=124.
 
 Classificação: os 3 FAIL/ERROR são **limitações de plataforma preexistentes**, não regressões
 (o commit é o HEAD intocado de `main`); os 30 SKIP são **BLOCKED** por artefatos/plataforma, nunca PASS.
@@ -232,10 +242,26 @@ Nenhum teste foi marcado PASS sem execução; logs completos em `/c/gow3/*.log` 
 
 ---
 
-## 4. Próximos passos
+## 4. Escopo do redesign de UI (decisão do mantenedor, 2026-10-12)
 
-A proposta de arquitetura da nova UI (launcher React+Tauri e tela de saves/menu em Dear ImGui)
-foi entregue em relatório separado ao mantenedor e **depende de aprovação expressa antes de qualquer
-implementação** (regra do `AGENTS.md`). Esta branch (`chore/zcode-baseline`) contém apenas este
-documento; nenhum código funcional foi alterado.
+**Definitivamente FORA do escopo:** o menu in-game aberto por Insert/R3+L2
+(`Menu()` em `gpu/shim/gow3_overlay.cpp`). Não redesenhar, refatorar nem modificar.
+
+O projeto de UI tem **exatamente dois objetivos**:
+
+1. **Launcher Windows** — redesign completo, moderno, cinematográfico e exclusivo de God of War
+   III Remastered, preservando **todas** as funções atuais (paridade funcional: Play/Display/
+   Performance/Game/Patches/Mods/Controls/Advanced/Log, backups, idiomas, atualização) e adotando
+   **português do Brasil** como idioma. Direção técnica proposta (aprovação pendente): React +
+   Tauri 2 híbrido com sidecar Python congelado para toda a orquestração do jogo (`run.py` +
+   `scripts/` intocados); Tkinter permanece fallback até paridade comprovada por testes de
+   saída dourada. O launcher NÃO será biblioteca de jogos, loja, dashboard administrativo nem
+   plataforma com funcionalidades fictícias.
+2. **Tela de saves in-game** — personalização **visual** da interface de salvar/carregar em Dear
+   ImGui (`ChoiceBox()`/`TextEntryBox()` em `gpu/shim/gow3_overlay.cpp`), sem modificar o backend
+   (`save_open/status/result`, `runtime_savedata.c`, ponte `gow3gpu_choice_begin`, decodificação
+   PNG) nem comprometer a compatibilidade; entrada por teclado/controle preservada.
+
+Implementação continua **dependendo de aprovação posterior**. Esta branch contém apenas
+documentação; nenhum código funcional foi alterado.
 
