@@ -729,5 +729,44 @@ class IntegrityPreToolUse(unittest.TestCase):
         self.assertEqual(bash("echo hi > $TEMP/gow3-guard-check.log")[0], PASS)
 
 
+class ReportExclusivity(unittest.TestCase):
+    """The report block must be the ENTIRE final message: nothing but whitespace around
+    it (permanent contract adjustment). Written first (red step)."""
+
+    def hook(self, text: str, session: str = "excl"):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "t.jsonl"
+            path.write_text(json.dumps({"message": {"role": "assistant",
+                                                    "content": [{"type": "text",
+                                                                 "text": text}]}}) + "\n",
+                            encoding="utf-8")
+            return run_hook("stop_guard.py",
+                            {"last_assistant_message": text, "session_id": session},
+                            {"ZCODE_PLUGIN_DATA": tmp})
+
+    def test_intro_before_block_rejected(self):
+        rc, err, _ = self.hook("Trabalho concluído! Segue o relatório.\n\n" + VALID_REPORT)
+        self.assertEqual(rc, BLOCK)
+        self.assertIn("outside", err)
+
+    def test_trailing_text_after_block_rejected(self):
+        rc, err, _ = self.hook(VALID_REPORT + "\n\nConclusão: tudo certo.")
+        self.assertEqual(rc, BLOCK)
+        self.assertIn("outside", err)
+
+    def test_other_code_fence_is_outside_content(self):
+        rc, err, _ = self.hook("```bash\nls\n```\n" + VALID_REPORT)
+        self.assertEqual(rc, BLOCK)
+        self.assertIn("outside", err)
+
+    def test_whitespace_around_block_passes(self):
+        rc, _, _ = self.hook("\n\n" + VALID_REPORT + "\n  \n")
+        self.assertEqual(rc, PASS)
+
+    def test_block_only_still_passes(self):
+        rc, _, _ = self.hook(VALID_REPORT)
+        self.assertEqual(rc, PASS)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

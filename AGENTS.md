@@ -72,9 +72,9 @@ Não criar múltiplos arquivos Markdown de estado concorrentes. A referência pe
 
 ## ZCODE FINAL REPORT CONTRACT (política obrigatória e permanente)
 
-Toda tarefa concluída, interrompida ou bloqueada deverá terminar com um relatório técnico estruturado dentro de UM ÚNICO BLOCO DE CÓDIGO, utilizando Markdown com identificador `text`.
+Toda resposta final de tarefa (concluída, interrompida ou bloqueada) conterá **exclusivamente um relatório técnico completo dentro de UM ÚNICO bloco de código** com identificador `text`. Nada além de espaços/quebras de linha pode existir fora do bloco: sem introduções, sínteses, explicações, listas, tabelas ou conclusões externas.
 
-Não apresentar o relatório final em tabelas Markdown, parágrafos dispersos ou listas fora do bloco.
+O relatório deve ser **autossuficiente**: quem receber somente o seu conteúdo precisa conseguir reconstruir o que foi feito, o que foi testado, o que falhou e quais evidências sustentam cada resultado.
 
 O formato obrigatório é:
 
@@ -126,12 +126,19 @@ NEXT
 ```
 
 Regras do relatório:
+- O bloco `text` é o conteúdo EXCLUSIVO da resposta final; qualquer texto fora dele (antes ou depois) invalida o relatório (validado pelo Stop hook).
+- Um único bloco `text`: blocos duplicados ou ausentes invalidam.
 - Sempre apresentar o relatório, inclusive quando a tarefa falhar.
-- Não inventar números, logs ou resultados.
-- Não usar PASS para testes não executados.
-- Distinguir regressões de problemas preexistentes.
-- Informar explicitamente quando o build não foi executado.
+- Não inventar números, logs ou resultados; nunca declarar PASS sem evidência real executada.
+- Não esconder falhas anteriores nem testes ignorados; distinguir regressões de problemas preexistentes.
+- Informar explicitamente o que NÃO foi executado (build, CI, integração com o host).
 - Não declarar aprovação do usuário sem confirmação.
-- Exibir o bloco de código como última seção da resposta.
-- Não escrever explicações extensas depois do relatório.
 - Manter exatamente o mesmo padrão entre tarefas.
+
+Conteúdo técnico aprofundado (dentro das seções fixas):
+- GIT: branch, SHA COMPLETO, referência de comparação (merge-base/ref) e estado do remoto (sync/local-only).
+- CHANGES: cada arquivo modificado com a finalidade da alteração; problemas identificados, causa raiz e solução implementada.
+- VALIDATION e AUDIT GATE: comandos executados, contagens, resultados e exit codes; separação EXPLÍCITA entre validação local, CI remoto e integração com o ZCode.
+- Evidências reproduzíveis: caminhos de logs, links de commits/PRs/runs do GitHub Actions, IDs de runs e jobs; resultado do Audit Gate com violações, exceções aplicadas, arquivos inspecionados e referência confiável usada.
+- RISKS: limitações, riscos, pendências e operações deliberadamente não executadas.
+- NEXT: próxima ação técnica necessária, concreta.

@@ -2,10 +2,11 @@
 """Stop hook of gow3-dev-guard (hardened after the independent audit of 7e85be1).
 
 Validates that the final assistant message satisfies the ZCODE FINAL REPORT CONTRACT
-(AGENTS.md): exactly one ```text fenced block, the report header, every required section —
-including RISKS — and every required field, each checked inside its own section, with a
-non-empty value. Structural check only: it proves the report exists and is complete, not
-that quoted logs are true (code review and CI stay owners of content).
+(AGENTS.md): exactly one ```text fenced block that IS THE ENTIRE final message (nothing
+but whitespace outside it), the report header, every required section — including RISKS —
+and every required field, each checked inside its own section, with a non-empty value.
+Structural check only: it proves the report exists and is complete, not that quoted logs
+are true (code review and CI stay owners of content).
 
 Message source (audit item 5): the host-provided `last_assistant_message` field takes
 priority, with the transcript (JSONL) as fallback.
@@ -96,13 +97,20 @@ def parse_sections(block: str) -> dict[str, list[str]]:
 
 
 def report_defects(text: str) -> list[str]:
-    """Missing/invalid pieces of the final report, in contract order."""
+    """Missing/invalid pieces of the final report, in contract order.
+    The contract (AGENTS.md, permanent adjustment): the single ```text block IS the
+    entire final message — nothing but whitespace may exist outside it."""
     defects: list[str] = []
     blocks = FENCED.findall(text)
     if len(blocks) == 0:
         return ["no ```text fenced block found — the report must be one text code block"]
     if len(blocks) > 1:
         defects.append(f"exactly one ```text block required, found {len(blocks)}")
+    remainder = FENCED.sub("", text)
+    if remainder.strip():
+        defects.append("content outside the single report block — the report block must"
+                       " be the entire final message (no intros, summaries, lists,"
+                       " tables or conclusions outside it)")
     block = blocks[-1]
     if not REPORT_HEADER.search(block):
         defects.append("missing header 'GOW3 — ZCODE REPORT'")
