@@ -163,8 +163,13 @@ def is_security_path(posix: str) -> bool:
 
 
 def path_violation(status: str, posix: str) -> str | None:
-    """The reason one changed path fails the gate (before exceptions), or None."""
+    """The reason one changed path fails the gate (before exceptions), or None.
+    Proprietary game material is checked FIRST and fails unconditionally — no surface,
+    prefix or special directory (reviews, upstream exceptions, workflows, harness) can
+    ever shelter it."""
     posix = normalize(posix)
+    if g.proprietary(posix):
+        return "proprietary game material in the changeset (AGENTS.md rule 4)"
     if posix.startswith(REVIEWS_PREFIX) or posix.startswith(UPSTREAM_EXCEPTIONS_PREFIX):
         return None  # maintainer approval records and exception declarations: data
     if posix.startswith(WORKFLOWS_PREFIX):
@@ -175,8 +180,6 @@ def path_violation(status: str, posix: str) -> str | None:
         if status == "D":
             return "harness file deleted — removal can never be excepted"
         return None  # harness add/modify: REVIEW REQUIRED (auditable protocol)
-    if g.proprietary(posix):
-        return "proprietary game material in the changeset (AGENTS.md rule 4)"
     reason = g.write_violation(posix, posix)
     if reason:
         return f"protected path changed: {reason.split(':')[0]}"

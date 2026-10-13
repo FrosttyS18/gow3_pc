@@ -1,31 +1,45 @@
 name: guard-audit
 
-# TRUSTED audit of a pull request. Architecture (per the official GitHub docs):
-#   * Trigger: workflow_run on guard-tests completion. The workflow file that runs is
-#     ALWAYS THE VERSION ON THE DEFAULT BRANCH ("this event will only trigger a workflow
-#     run if the workflow file exists on the default branch") — a PR can never rewrite
-#     its own audit instructions, which is why pull_request_target (heavily discouraged
-#     by the docs for running anything PR-related, and subject of announced policy
-#     changes for public repositories) is NOT used here.
-#   * The PR head SHA comes from the event payload (github.event.workflow_run.head_sha)
-#     — data, not PR-controlled input — and is fetched as git objects only. No PR code
-#     is executed in this context; the gate itself comes from the base checkout.
-#   * The audit runs on every completed guard-tests run of a pull_request, INCLUDING
-#     failures — breaking or deleting the tests cannot dodge the audit.
-#   * Permissions are minimal (contents: read); credentials are not persisted.
+# TRUSTED audit of a pull request, eligible as a REQUIRED status check.
+#
+# Why pull_request_target: the previous workflow_run design cannot be used — checks
+# created by workflow_run runs are reported against the default-branch SHA, not against
+# the pull request, so branch protection cannot require them (audit finding, confirmed
+# against the GitHub docs). pull_request_target runs the workflow file FROM THE BASE
+# BRANCH, and its check runs attach to the pull request, making them eligible required
+# checks.
+#
+# Official policy that applies to this event (docs: "Securely using pull_request_target"):
+#   * Public repositories receive a DEFAULT POLICY THAT BLOCKS pull_request_target
+#     workflows; it is currently in EVALUATE mode (runs continue) and will be ENFORCED
+#     ON NOVEMBER 2, 2026.
+#   * To keep this workflow running after enforcement, the maintainer must create/update
+#     the repository Actions event policy to EXPLICITLY ALLOW pull_request_target
+#     (Settings → Actions → event policies). This is a documented precondition of the
+#     harness; until then the current evaluate mode lets it run.
+#
+# Hardening rules implemented here (per the same docs):
+#   * The ONLY checkout is the trusted base branch; the PR head is NEVER checked out.
+#     Its objects are fetched with `git fetch` and inspected as DATA (diff/ls-tree/show)
+#     — "the checked-out code is only ever inspected as data and never executed".
+#   * permissions: contents: read; persist-credentials: false; no secrets are used;
+#     no cache is written or restored (privileged triggers share the default branch's
+#     cache scope — nothing here uses cache at all).
+#   * Unsupported scenarios FAIL the check explicitly (red), never skip — a skipped or
+#     missing check must never read as approval. Fork pull requests are rejected.
 #
 # Exit codes of the gate: 0 PASS · 1 FAIL · 2 error · 3 REVIEW REQUIRED (security
-# files changed and no maintainer approval record covers this head on the trusted ref).
+# surfaces changed and no maintainer approval record on the trusted ref covers this
+# head — records under zcode/gow3-dev-guard/reviews/ on main, never inside the PR).
 #
-# BOOTSTRAP LIMITATION (explicit): workflow_run fires only when THIS file already exists
-# on the default branch. The first harness PR (the bootstrap) cannot be audited by it;
-# the maintainer merges it consciously (see README "Primeiro merge") and afterwards this
-# workflow audits every pull request from the trusted base.
+# BOOTSTRAP LIMITATION (explicit): pull_request_target only runs workflows that already
+# exist on the BASE branch, so the harness bootstrap PR itself is not audited (the check
+# does not exist on main yet). The maintainer merges it consciously; from the next PR on,
+# this check appears and is eligible as required. See README "Primeiro merge".
 
 on:
-  workflow_run:
-    workflows: [guard-tests]
-    types: [completed]
+  pull_request_target:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -35,12 +49,19 @@ jobs:
   trusted-audit:
     name: trusted audit gate (base ref)
     runs-on: windows-latest
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.event == 'pull_request' &&
-       github.event.workflow_run.head_repository.full_name == github.repository)
     steps:
-      - name: Checkout the trusted default branch (never the PR code)
+      - name: Reject unsupported scenarios explicitly (fork pull requests)
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request_target" ]; then
+            echo "manual run"; exit 0
+          fi
+          if [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+            echo "::error::fork pull requests are not supported by the trusted audit; a maintainer must push the branch to this repository"
+            exit 1
+          fi
+
+      - name: Checkout the trusted base branch (the PR head is never checked out)
         uses: actions/checkout@v4
         with:
           ref: main
@@ -52,46 +73,53 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Fetch the audited head as data (objects only, nothing executed)
-        if: github.event_name != 'workflow_dispatch'
+      - name: Fetch the audited head as data (git objects only, nothing executed)
+        if: github.event_name == 'pull_request_target'
         shell: bash
         run: |
-          git fetch --no-tags origin "${{ github.event.workflow_run.head_sha }}"
-          git rev-parse --verify '${{ github.event.workflow_run.head_sha }}^{commit}'
+          git fetch --no-tags origin "${{ github.event.pull_request.head.sha }}"
+          git rev-parse --verify '${{ github.event.pull_request.head.sha }}^{commit}'
 
       - name: Extract upstream exception declarations from the head (data only)
-        if: github.event_name != 'workflow_dispatch'
+        if: github.event_name == 'pull_request_target'
         shell: bash
         run: |
           mkdir -p exceptions
-          head='${{ github.event.workflow_run.head_sha }}'
+          head='${{ github.event.pull_request.head.sha }}'
           git ls-tree -r --name-only "$head" -- zcode/upstream-exceptions/ \
             | while read -r f; do git show "$head:$f" > "exceptions/$(basename "$f")"; done
           found=$(ls exceptions 2>/dev/null | wc -l | tr -d ' ')
           echo "Extracted $found upstream exception declaration(s)"
 
-      - name: Run the trusted audit gate against the audited head
-        if: github.event_name != 'workflow_dispatch'
+      - name: Run the trusted audit gate (from the base checkout) against the PR head
+        if: github.event_name == 'pull_request_target'
         shell: bash
         run: |
           set +e
           gate=zcode/gow3-dev-guard/tools/audit_gate.py
           if [ ! -f "$gate" ]; then
-            echo "::notice::bootstrap — the audit gate is not on the default branch yet; this workflow ships with the harness PR. Maintainer review required."
+            echo "::notice::bootstrap — the audit gate is not on the base branch yet; this workflow ships with the harness PR. Maintainer review required."
             exit 3
           fi
-          args=(--ref origin/main --head "${{ github.event.workflow_run.head_sha }}")
+          args=(--ref origin/main --head "${{ github.event.pull_request.head.sha }}")
           for f in exceptions/*.json; do
             [ -e "$f" ] && args+=(--upstream-exception "$f")
           done
           python "$gate" "${args[@]}"
           rc=$?
           if [ "$rc" -eq 3 ]; then
-            echo "::notice::gate exit 3: security files changed without a maintainer approval record on the trusted ref (zcode/gow3-dev-guard/reviews/) — trusted-source review required"
+            echo "::notice::gate exit 3: security surfaces changed without a maintainer approval record on the trusted ref (zcode/gow3-dev-guard/reviews/) — trusted-source review required"
           fi
           exit "$rc"
 
-      - name: Self-audit of the default branch (manual runs)
-        if: github.event_name == 'workflow_dispatch'
+      - name: Self-audit of the base branch (manual runs)
+        if: github.event_name != 'pull_request_target'
         shell: bash
-        run: python zcode/gow3-dev-guard/tools/audit_gate.py --ref origin/main~1 --head origin/main
+        run: |
+          set +e
+          python zcode/gow3-dev-guard/tools/audit_gate.py --ref origin/main~1 --head origin/main
+          rc=$?
+          if [ "$rc" -eq 3 ]; then
+            echo "::notice::expected after security-carrying merges: record the approval (zcode/gow3-dev-guard/reviews/) or confirm REVIEW_REQUIRED consciously"
+          fi
+          exit "$rc"

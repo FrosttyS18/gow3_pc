@@ -4,11 +4,11 @@ Plugin do ZCode versionado no repositório (`zcode/gow3-dev-guard`), com marketp
 `zcode/marketplace.json`. Sem código do jogo, sem rede, sem LLM: toda decisão é caminho
 resolvido, regex, consulta git somente-leitura ou diff real — avaliada em código.
 
-**v0.5.0** — correção final do CI confiável (PR #1): auditoria disparada por
-`workflow_run` (o workflow que audita é SEMPRE o do branch default — nenhum `pull_request`
-nem `pull_request_target` no caminho crítico), superfícies de segurança por prefixo
-(`.github/workflows/`, `zcode/`) com protocolo de aprovação por registro do mantenedor na
-referência confiável, e 25 testes do Audit Gate.## Componentes
+**v0.6.0** — bootstrap desbloqueado (PR #1): auditoria via **`pull_request_target`
+endurecido** (elegível como required status check; `workflow_run` foi descartado porque
+seus checks reportam no SHA do branch default e não podem ser exigidos na proteção de
+branches), material proprietário **incondicional** em qualquer superfície, e procedimento
+de bootstrap corrigido. 30 testes do Audit Gate.## Componentes
 
 | Arquivo | Papel |
 |---|---|
@@ -56,47 +56,57 @@ declarações em `zcode/upstream-exceptions/*.json` no PR.
 Exit codes: `0` PASS · `1` FAIL · `2` erro · `3` REVIEW REQUIRED (resolvido apenas por registro do mantenedor na referência confiável; nunca vira PASS sozinho). `--registry-file`
 sobrescreve o registro apenas para testes/manutenção (o CI confiável nunca o passa).
 
-## CI e proteção da main (v0.5.0)
+## CI e proteção da main (v0.6.0)
 
 - `guard-tests.yml` — evento `pull_request` (não privilegiado, `contents: read`):
-  `test_guard.py` (90) e `test_audit_gate.py` (25) no merge ref do PR.
-- `guard-audit.yml` — evento **`workflow_run`** (após `guard-tests` completar): a versão
-  do workflow que executa é sempre a do **branch default** (documentação oficial: "this
-  event will only trigger a workflow run if the workflow file exists on the default
-  branch"). O PR não pode reescrever suas próprias instruções de auditoria — por isso não
-  usamos `pull_request` (executa o workflow do PR) nem `pull_request_target` (funciona,
-  mas é desencorajado pela documentação e sujeito a mudanças de política para repos
-  públicos). O SHA auditado (`github.event.workflow_run.head_sha`) vem do payload do
-  evento — dado, não entrada do PR — e é buscado como objetos git; a referência é
-  `origin/main`. O gate roda do checkout da base (`ref: main`, `persist-credentials:
-  false`), inclusive quando o `guard-tests` falha (quebrar os testes não escapa da
-  auditoria). Workflows validados com actionlint 1.7.12 (zero findings).
+  `test_guard.py` (90) e `test_audit_gate.py` (30) no merge ref do PR.
+- `guard-audit.yml` — evento **`pull_request_target`** (branches: main): a versão do
+  workflow executada é a do **branch base** (documento oficial), e o check anexa-se ao
+  PR — **elegível como required status check** (motivo da troca: checks de `workflow_run`
+  reportam no SHA do branch default e não podem ser exigidos na proteção). Endurecimento
+  conforme a página oficial "Securely using pull_request_target": único checkout é a base
+  (`ref: main`, `persist-credentials: false`, `contents: read`); o head do PR **nunca** é
+  feito checkout — seus objetos chegam por `git fetch` e são inspecionados **como dados**
+  (diff/ls-tree/show: "the checked-out code is only ever inspected as data and never
+  executed"); sem secrets, sem cache; forks e cenários não suportados **falham o check
+  explicitamente** (nunca ficam em estado ignorado que possa ler-se como aprovação);
+  referência confiável = `origin/main`; SHA auditado = `github.event.pull_request.head.sha`
+  (payload do evento).
 
-**Limitação de bootstrap (explícita):** `workflow_run` só dispara quando o
-`guard-audit.yml` já existe no branch default. O PR #1 (que traz o harness) não pode ser
-auditado por ele. Procedimento do primeiro merge:
+**Política oficial (pré-condição do mantenedor):** a documentação informa que repos
+públicos recebem uma política padrão que **bloqueia workflows `pull_request_target`**,
+hoje em modo *evaluate* (as execuções seguem), com **aplicação em 2 de novembro de
+2026**. Para manter este workflow após essa data, o mantenedor deve criar/atualizar a
+**Actions event policy** do repositório autorizando explicitamente
+`pull_request_target` (Settings → Actions). Até lá, o modo evaluate permite a execução.
 
-1. Mantenedor revisa o PR #1 (o check `guard-audit` não existirá para ele — isso é a
-   limitação documentada; `guard-tests` deve estar verde).
-2. Merge consciente para `main` (branch protection ainda desativada — ver abaixo).
-3. Imediatamente após: Actions → **guard-audit → Run workflow** (self-audit
-   `origin/main~1..origin/main`) e conferir verde.
-4. Abrir um PR de teste trivial (ex.: comentário em docs/) e conferir nos runs que
-   `guard-audit` dispara com `event=workflow_run` e audita o head do PR da base.
+**Material proprietário é incondicional:** `eboot.bin`, `*.pkg`, `*.prx`, `*.sprx`,
+`sce_module/`, `sce_sys/`, `savedata/` em **qualquer** caminho — inclusive dentro de
+`zcode/gow3-dev-guard/reviews/`, `zcode/upstream-exceptions/`, `.github/workflows/` e do
+próprio harness — resultam em FAIL, nunca PASS nem REVIEW_REQUIRED.
 
-**Alterações futuras no próprio harness (protocolo auditável, sem auto-aprovação):**
-qualquer mudança em `.github/workflows/` ou `zcode/` gera exit 3 REVIEW_REQUIRED — nunca
-PASS automático. Para aprovar: o mantenedor revisa o PR e grava um registro na **main**
-(`zcode/gow3-dev-guard/reviews/<data>-<slug>.json` com `{"head_sha", "pr", "approved_by",
-"note"}`), commit direto do mantenedor (um único mantenedor não fica bloqueado por
-exigência de segundo revisor). O gate lê os registros **da árvore da referência
-confiável** — um PR jamais aprova a si mesmo. Não existe variável/global que desative a
-auditoria.
+**Procedimento de bootstrap (corrigido — o primeiro merge instala o verificador):**
+1. Revisão consciente do PR #1 pelo mantenedor (o check `guard-audit` não existe para
+   ele: `pull_request_target` só executa workflows já presentes na base — limitação
+   documentada; `guard-tests` deve estar verde).
+2. Merge inicial autorizado pelo mantenedor (branch protection ainda desativada).
+3. PR descartável de teste com alteração permitida (ex.: nota em docs/): confirmar que o
+   check `trusted audit gate (base ref)` aparece no PR, dispara como
+   `event=pull_request_target`, executa o gate da base contra o head do PR e fica verde.
+4. PR descartável separado com alteração proibida (ex.: tocar `src/`): confirmar que o
+   mesmo check fica vermelho com o motivo — o bloqueio funciona de ponta a ponta.
+5. Somente então habilitar a proteção da `main` exigindo os checks reais
+   **`trusted audit gate (base ref)`** e **`guard + gate test suites`** (sem exigir
+   segundo revisor — mantenedor único; proibir force-push). Nota: o self-audit manual
+   (dispatch) após um merge que carrega mudanças de segurança retorna REVIEW_REQUIRED
+   por design — grave o registro de aprovação na main ou confirme conscientemente.
 
-**Branch protection (nomes REAIS dos checks, habilitar somente APÓS o primeiro merge):**
-exigir `trusted audit gate (base ref)` e `guard + gate test suites`; **não** exigir
-approving reviews (mantenedor único) — a revisão é feita pelo protocolo de registros
-acima; proibir force-push em `main`.
+**Alterações futuras no próprio harness:** mudanças em `.github/workflows/` ou `zcode/` ⇒
+exit 3 REVIEW_REQUIRED (nunca PASS automático). O mantenedor aprova gravando
+`zcode/gow3-dev-guard/reviews/<data>-<slug>.json` (`{"head_sha", "pr", "approved_by",
+"note"}` — SHA exato, rastreável) **na main**; o gate lê os registros da árvore da
+referência confiável, então um PR jamais aprova a si mesmo (testado). A manutenção do
+harness nunca exige desligar a branch protection: cada mudança tem registro próprio.
 
 ## Ativação no ZCode (camada 1; ação única do usuário)
 
@@ -123,7 +133,7 @@ Mensagens de bloqueio sempre com motivo e caminho.
 
 ```
 python zcode/gow3-dev-guard/tests/test_guard.py -v        # 90 testes (camada 1)
-python zcode/gow3-dev-guard/tests/test_audit_gate.py -v   # 13 testes (camada 2, fixtures)
+python zcode/gow3-dev-guard/tests/test_audit_gate.py -v   # 30 testes (camada 2, fixtures)
 ```
 
 Red→green da integridade: as 6 lacunas da reauditoria foram escritas primeiro e falharam

@@ -501,5 +501,85 @@ class UpstreamExceptionFixtures(unittest.TestCase):
             shutil.rmtree(repo.parent, ignore_errors=True)
 
 
+class ProprietaryUnconditionalFixtures(unittest.TestCase):
+    """Proprietary game material fails UNCONDITIONALLY — no surface, special directory or
+    approval mechanism can ever shelter it (audit item 2)."""
+
+    def _assert_fail(self, repo: Path, needle: str):
+        rc, out = run_gate(repo, "--ref", "main")
+        self.assertEqual(rc, 1, out)  # FAIL, never PASS and never REVIEW_REQUIRED
+        self.assertIn(needle, out)
+
+    def test_proprietary_inside_reviews_dir(self):
+        repo = make_repo()
+        try:
+            sneaky = repo / "zcode" / "gow3-dev-guard" / "reviews" / "eboot.bin"
+            sneaky.parent.mkdir(parents=True)
+            sneaky.write_bytes(b"MZ")
+            commit_all(repo, "sneak review")
+            self._assert_fail(repo, "eboot.bin")
+        finally:
+            shutil.rmtree(repo.parent, ignore_errors=True)
+
+    def test_proprietary_inside_upstream_exceptions_dir(self):
+        repo = make_repo()
+        try:
+            sneaky = repo / "zcode" / "upstream-exceptions" / "game.pkg"
+            sneaky.parent.mkdir(parents=True)
+            sneaky.write_bytes(b"\x7fPKG")
+            commit_all(repo, "sneak exception")
+            self._assert_fail(repo, "game.pkg")
+        finally:
+            shutil.rmtree(repo.parent, ignore_errors=True)
+
+    def test_proprietary_inside_workflows_dir(self):
+        repo = make_repo()
+        try:
+            sneaky = repo / ".github" / "workflows" / "lib.prx"
+            sneaky.parent.mkdir(parents=True)
+            sneaky.write_bytes(b"\0")
+            commit_all(repo, "sneak workflow")
+            self._assert_fail(repo, "lib.prx")
+        finally:
+            shutil.rmtree(repo.parent, ignore_errors=True)
+
+    def test_proprietary_savedata_inside_zcode(self):
+        repo = make_repo()
+        try:
+            sneaky = repo / "zcode" / "savedata" / "slot1.bin"
+            sneaky.parent.mkdir(parents=True)
+            sneaky.write_bytes(b"\0")
+            commit_all(repo, "sneak savedata")
+            self._assert_fail(repo, "savedata")
+        finally:
+            shutil.rmtree(repo.parent, ignore_errors=True)
+
+    def test_self_approval_inside_the_pr_is_ignored(self):
+        repo = make_repo()
+        try:
+            workflow = repo / ".github" / "workflows" / "new.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text("name: new\n", encoding="utf-8")
+            reviews = repo / "zcode" / "gow3-dev-guard" / "reviews"
+            reviews.mkdir(parents=True)
+            (reviews / "self-approval.json").write_text("{}", encoding="utf-8")
+            commit_all(repo, "add workflow + self approval placeholder")
+            # the PR tries to approve ITSELF: the record lives in the analyzed branch,
+            # not in the trusted reference — it must be ignored (still REVIEW_REQUIRED)
+            head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                                  capture_output=True, text=True).stdout.strip()
+            (reviews / "self-approval.json").write_text(json.dumps(
+                {"head_sha": head, "pr": 99, "approved_by": "attacker",
+                 "note": "self approval"}), encoding="utf-8")
+            commit_all(repo, "self approve")
+            head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                                  capture_output=True, text=True).stdout.strip()
+            rc, out = run_gate(repo, "--ref", "main", "--head", head)
+            self.assertEqual(rc, 3, out)
+            self.assertIn("REVIEW REQUIRED", out)
+        finally:
+            shutil.rmtree(repo.parent, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
