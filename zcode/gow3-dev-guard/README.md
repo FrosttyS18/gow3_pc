@@ -126,7 +126,9 @@ branch determinável ≠ `main`; PowerShell com destino inverificável ⇒ bloqu
 pathspec+`--dry-run` em `add`, staged em `commit`, **worktree em `commit -a/-am/--all
 --include`**, `-C` aceito em push/checkout (push para `main`/force sempre bloqueados),
 `checkout --`/`restore`/`stash`/`git rm` protegidos. Stop: `last_assistant_message`
-prioritário, RISKS exigido, campos por seção, bloco ```text único, anti-loop (2×).
+prioritário, RISKS exigido, campos por seção, bloco ```text único **e exclusivo** (nada
+além de espaços fora do bloco — introduções/sínteses/listas/conclusões externas
+invalidam; ajuste permanente do contrato), anti-loop (2×).
 Mensagens de bloqueio sempre com motivo e caminho.
 
 ## Testes e evidências
