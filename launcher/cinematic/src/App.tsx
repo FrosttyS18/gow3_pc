@@ -17,6 +17,7 @@ export default function App() {
   const [playError, setPlayError] = useState("")
   const [bridgeError, setBridgeError] = useState("")
   const startedAt = useRef(0)
+  const hiddenForPlay = useRef(false)
 
   const refresh = useCallback(() => {
     bridge.state().then(setState).catch((e) => setBridgeError(String(e.message ?? e)))
@@ -58,6 +59,13 @@ export default function App() {
             window.dispatchEvent(new CustomEvent("gow3:restore-music"))
           } else {
             setPhase("idle")
+            if (hiddenForPlay.current) {
+              hiddenForPlay.current = false
+              window.dispatchEvent(new CustomEvent("gow3:restore-music"))
+              await (window as unknown as { __TAURI__?: { window: { getCurrentWindow: () => { close(): Promise<void> } } } })
+                .__TAURI__?.window.getCurrentWindow().close()
+              return
+            }
           }
           refresh()
         }
@@ -79,6 +87,15 @@ export default function App() {
     try {
       await bridge.play()  // spawn aceito (validações incluídas): só agora o fade
       window.dispatchEvent(new CustomEvent("gow3:fade-music"))
+      // Conflito close_on_play × supervisão de processo (Job): fechar o launcher
+      // agora MATARIA o jogo (regra definitiva M1.6). Em vez disso a janela se
+      // OCULTA e o launcher sai quando o jogo terminar. Config original preservada;
+      // comportamento final pendente de decisão do mantenedor.
+      if (state?.app.close_on_play) {
+        await (window as unknown as { __TAURI__?: { window: { getCurrentWindow: () => { hide(): Promise<void> } } } })
+          .__TAURI__?.window.getCurrentWindow().hide()
+        hiddenForPlay.current = true
+      }
     } catch (e) {
       setPhase("error")
       setPlayError(String((e as Error).message ?? e))
@@ -93,7 +110,8 @@ export default function App() {
           onError={(e) => { (e.target as HTMLImageElement).style.display = "none" }} />
       </div>
       <TitleBar />
-      <div className="logo" title="Início" onClick={() => setPage("home")}>
+      <div className="logo" aria-label="Início" role="button" tabIndex={0} onClick={() => setPage("home")}
+        onKeyDown={(e) => { if (e.key === "Enter") setPage("home") }}>
         <img src="art/logo-gow-3.png" alt="God of War III"
           onError={(e) => {
             (e.target as HTMLImageElement).style.display = "none"

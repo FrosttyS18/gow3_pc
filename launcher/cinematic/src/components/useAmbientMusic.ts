@@ -8,7 +8,7 @@ import { bridge, MusicState } from "../bridge"
  *  primeira interação; UMA instância de áudio; fade-out ao iniciar o jogo e
  *  restauração em falha — com token de geração que CANCELA fades pendentes
  *  (um fade antigo nunca silencia a música após um restore). */
-export const MUSIC_FIXED_VOLUME = 0.05
+export const MUSIC_FIXED_VOLUME = 0.03
 
 export function useAmbientMusic(music: MusicState | undefined, muted: boolean) {
   const audio = useRef<HTMLAudioElement | null>(null)

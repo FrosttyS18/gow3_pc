@@ -29,7 +29,7 @@
   --toggle-w: 66px;            /* 99 x 2/3 */
   --toggle-h: 33px;            /* 49.5 x 2/3 */
   --toggle-radius: 14.5px;     /* 21.74 x 2/3 */
-  --toggle-knob: 27px;         /* 42.55x2/3=28.37 ajustado p/ respiro >=2px */
+  --toggle-knob: 26px;         /* 42.55x2/3=28.37; reduzido p/ separacao VISUAL clara */
   --focus-ring: 1px solid rgba(230, 224, 216, 0.45);
   --hover-ms: 200ms;
   --hover-ease: cubic-bezier(0.2, 0.7, 0.3, 1);
@@ -249,12 +249,14 @@ body { font-family: var(--font); color: var(--text); background: var(--bg); }
   transition: background var(--hover-ms) var(--hover-ease), border-color var(--hover-ms) var(--hover-ease);
 }
 .toggle .knob {
-  position: absolute; top: 2.5px; left: 2.5px;
+  position: absolute; top: 3px; left: 3px;
   width: var(--toggle-knob); height: var(--toggle-knob);
   border-radius: 50%;
   background: var(--figma-red); color: #ffffff;
   display: grid; place-items: center;
-  box-shadow: 0.5px 1.4px 0.9px rgba(0, 0, 0, 0.25);   /* 0.82/2.05/1.39 x 2/3 */
+  box-shadow:
+    0 0 0 1.5px rgba(0, 0, 0, 0.85),               /* aro escuro: separacao VISUAL da borda */
+    0.5px 1.4px 0.9px rgba(0, 0, 0, 0.25);          /* 0.82/2.05/1.39 x 2/3 */
   transition: left var(--hover-ms) var(--hover-ease),
     background var(--hover-ms) var(--hover-ease), color var(--hover-ms) var(--hover-ease);
 }
@@ -269,7 +271,7 @@ body { font-family: var(--font); color: var(--text); background: var(--bg); }
 /* ON: fundo vermelho, borda preta, círculo branco desliza à direita com seta preta,
    texto ON fica à ESQUERDA do círculo */
 .toggle.on { background: var(--figma-red); border-color: #000000; }
-.toggle.on .knob { left: calc(100% - var(--toggle-knob) - 2.5px); background: #ffffff; color: #000000; }
+.toggle.on .knob { left: calc(100% - var(--toggle-knob) - 3px); background: #ffffff; color: #000000; }
 .toggle.on .state { left: 10px; right: auto; }
 .toggle:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
 
@@ -396,6 +398,29 @@ body { font-family: var(--font); color: var(--text); background: var(--bg); }
   min-height: 380px; max-height: 470px;
 }
 .log-page { display: flex; flex-direction: column; }
+
+/* ---- tooltip do design system (nunca o nativo do navegador) ------------------------ */
+.tooltip-host { position: relative; display: inline-flex; }
+.tooltip-host .tooltip-tip {
+  position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%) translateY(3px);
+  background: rgba(5, 4, 4, 0.95);
+  border: var(--field-border-w) solid var(--figma-red);
+  border-radius: 5px;
+  color: var(--text);
+  font-family: var(--font-light); font-size: 12px; font-weight: 300; letter-spacing: 0.01em;
+  padding: 6px 10px; white-space: nowrap;
+  opacity: 0; pointer-events: none; visibility: hidden;
+  transition: opacity 140ms ease, transform 140ms ease, visibility 140ms;
+  z-index: 80;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.6);
+}
+.tooltip-host.open .tooltip-tip,
+.tooltip-host:hover .tooltip-tip,
+.tooltip-host:focus-within .tooltip-tip {
+  opacity: 1; visibility: visible; transform: translateX(-50%) translateY(0);
+}
+.nav-music-tip { position: absolute; inset: 0; pointer-events: none; }
+.nav-music-tip .tooltip-host { position: absolute; left: 50%; top: 50%; }
 
 /* ---- movimento reduzido --------------------------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {

@@ -1,4 +1,5 @@
 import type { Page } from "../App"
+import { Tooltip } from "./Tooltip"
 
 /** Menu vertical fiel ao Figma, com as páginas REAIS do launcher original e a
  *  décima opção MÚSICA — uma AÇÃO (mute/religar), não uma rota: não muda a
@@ -39,7 +40,6 @@ export function NavMenu({ page, onNavigate, musicMuted, onToggleMusic }: {
         className="music-toggle"
         aria-pressed={musicMuted ? "false" : "true"}
         aria-label={musicMuted ? "Ativar música" : "Silenciar música"}
-        title={musicMuted ? "Música desligada — clique para ligar" : "Música ligada — clique para silenciar"}
         onClick={onToggleMusic}
       >
         <svg className="music-icon" width="13" height="13" viewBox="0 0 24 24" aria-hidden="true">
@@ -51,6 +51,11 @@ export function NavMenu({ page, onNavigate, musicMuted, onToggleMusic }: {
         </svg>
         Música
       </button>
+      <span className="nav-music-tip" aria-hidden="true">
+        <Tooltip text={musicMuted ? "Música desligada — clique para ativar" : "Música ligada — clique para silenciar"}>
+          <span className="tip-anchor" tabIndex={-1} />
+        </Tooltip>
+      </span>
     </nav>
   )
 }

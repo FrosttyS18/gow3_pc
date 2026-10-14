@@ -121,8 +121,30 @@ def music_state(app: dict) -> dict:
             "muted": bool(app.get("ambient_muted", False))}
 
 
+GPU_CACHE_FILE = Path(tempfile.gettempdir()) / "gow3-cinematic-gpus.json"
+
+
+def cached_gpus():
+    """list_gpus executa gow3-gpu-capabilities (segundos) e cada ponte é um processo
+    NOVO: o cache precisa persistir em ARQUIVO para valer entre chamadas (5 min)."""
+    import time
+    try:
+        data = json.loads(GPU_CACHE_FILE.read_text(encoding="utf-8"))
+        if time.time() - data.get("when", 0) < 300:
+            return [tuple(row) for row in data["rows"]]
+    except (OSError, ValueError, KeyError):
+        pass
+    rows = L.list_gpus()
+    try:
+        GPU_CACHE_FILE.write_text(json.dumps(
+            {"when": time.time(), "rows": [list(row) for row in rows]}), encoding="utf-8")
+    except OSError:
+        pass
+    return rows
+
+
 def all_choices(app: dict) -> dict:
-    gpus = L.list_gpus()
+    gpus = cached_gpus()
     c = {
         "display_mode": choice_labels(L.DISPLAY_MODES),
         "render_resolution": choice_labels(L.RESOLUTION_CHOICES),
@@ -387,12 +409,12 @@ def cmd_log_read() -> dict:
 def _check_play_prerequisites(app: dict) -> str | None:
     """As validações que o Tkinter faz antes de iniciar (Launcher.play), com mensagens
     acionáveis em pt-BR. Retorna None quando pode iniciar."""
-    folder = meta_dir(app)
-    if not L.game_info(folder):
-        return "Pasta do jogo não configurada ou sem eboot.bin válido (configure na página Jogo)."
     import os as _os
     if _os.environ.get("GOW3_CINEMATIC_SKIP_GAME_CHECK") == "1":
         return None  # apenas para testes de integração com processo substituto
+    folder = meta_dir(app)
+    if not L.game_info(folder):
+        return "Pasta do jogo não configurada ou sem eboot.bin válido (configure na página Jogo)."
     try:
         source = L.system_files_beside(folder)
         if source:
