@@ -1,32 +1,31 @@
 import type { Page } from "../App"
 import { Tooltip } from "./Tooltip"
+import { useI18n } from "../i18n"
 
 /** Menu vertical fiel ao Figma, com as páginas REAIS do launcher original e a
- *  décima opção MÚSICA — uma AÇÃO (mute/religar), não uma rota: não muda a
- *  página selecionada, não abre painel e NUNCA recebe a linha vermelha de
- *  seleção. Mesma tipografia/hover dos demais itens; ícone discreto de alto-
- *  falante refletindo o estado (aria-pressed). */
-const ITEMS: { id: Page; label: string }[] = [
-  { id: "display", label: "Display" },
-  { id: "graphics", label: "Gráficos" },
-  { id: "performance", label: "Performance" },
-  { id: "game", label: "Game" },
-  { id: "patches", label: "Patches" },
-  { id: "mods", label: "Mods" },
-  { id: "controls", label: "Controls" },
-  { id: "advanced", label: "Advanced" },
-  { id: "log", label: "Log" },
-]
-
+ *  décima opção MÚSICA — uma AÇÃO (mute/religar), não uma rota. Os rótulos vêm
+ *  do i18n central (gow3_lang) — a troca de idioma é imediata. */
 export function NavMenu({ page, onNavigate, musicMuted, onToggleMusic }: {
   page: Page
   onNavigate: (p: Page) => void
   musicMuted: boolean
   onToggleMusic: () => void
 }) {
+  const { t } = useI18n()
+  const items: { id: Page; label: string }[] = [
+    { id: "display", label: t("Display & FPS") },
+    { id: "graphics", label: t("Graphics") },
+    { id: "performance", label: t("Performance") },
+    { id: "game", label: t("Game & effects") },
+    { id: "patches", label: t("Mods & patches") },
+    { id: "mods", label: t("Mods & patches") },
+    { id: "controls", label: t("Gamepad names") },
+    { id: "advanced", label: t("Advanced") },
+    { id: "log", label: t("Log") },
+  ]
   return (
-    <nav className="nav" aria-label="Menu principal">
-      {ITEMS.map(({ id, label }) => (
+    <nav className="nav" aria-label={t("Log")}>
+      {items.map(({ id, label }) => (
         <button
           key={id}
           className={page === id ? "active" : ""}
@@ -39,7 +38,7 @@ export function NavMenu({ page, onNavigate, musicMuted, onToggleMusic }: {
         type="button"
         className="music-toggle"
         aria-pressed={musicMuted ? "false" : "true"}
-        aria-label={musicMuted ? "Ativar música" : "Silenciar música"}
+        aria-label={musicMuted ? t("Play") + " música" : t("Stop") + " música"}
         onClick={onToggleMusic}
       >
         <svg className="music-icon" width="13" height="13" viewBox="0 0 24 24" aria-hidden="true">
@@ -49,10 +48,12 @@ export function NavMenu({ page, onNavigate, musicMuted, onToggleMusic }: {
             <path fill="currentColor" d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z" />
           )}
         </svg>
-        Música
+        {t("Play") === "Jogar" ? "Música" : "Music"}
       </button>
       <span className="nav-music-tip" aria-hidden="true">
-        <Tooltip text={musicMuted ? "Música desligada — clique para ativar" : "Música ligada — clique para silenciar"}>
+        <Tooltip text={musicMuted
+          ? (t("Play") === "Jogar" ? "Música desligada — clique para ativar" : "Music off — click to turn on")
+          : (t("Play") === "Jogar" ? "Música ligada — clique para silenciar" : "Music on — click to mute")}>
           <span className="tip-anchor" tabIndex={-1} />
         </Tooltip>
       </span>

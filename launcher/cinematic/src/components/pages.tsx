@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react"
 import { BridgeState, bridge } from "../bridge"
+import { useI18n } from "../i18n"
 import { ActionButton, Dropdown, Field, PathField, Section, Toggle, pickFolderAndSet, useSaver } from "./inputs"
 
 type P = { state: BridgeState; refresh: () => void }
 
 /* ---------- Tela (build_display) ---------- */
 export function DisplayPage({ state, refresh }: P) {
+  const { t } = useI18n()
   const { run, error } = useSaver(refresh)
   const ini = state.ini
   const app = state.app
@@ -13,9 +15,9 @@ export function DisplayPage({ state, refresh }: P) {
   const setApp = (k: string, v: boolean) => run(() => bridge.setApp({ [k]: v }))
   return (
     <div className="settings">
-      <h1>Tela</h1>
+      <h1>{t("Display & FPS")}</h1>
       {error && <p className="op-error">{error}</p>}
-      <Section title="Janela">
+      <Section title={t("Window")}>
         <Field label="Modo de exibição" hint="Sem bordas cobre a tela sem trocar o modo do monitor.">
           <Dropdown value={ini.display_mode ?? "windowed"} choices={state.choices.display_mode}
             onChange={(v) => setIni("display_mode", v)} label="Modo de exibição" />
@@ -27,7 +29,7 @@ export function DisplayPage({ state, refresh }: P) {
           <Toggle value={!!app.hdr} onChange={(v) => setApp("hdr", v)} label="Permitir saída HDR" />
         </Field>
       </Section>
-      <Section title="Escala e nitidez">
+      <Section title={t("Sharpening (RCAS)")}>
         <Field label="Ampliar com FSR 1"
                hint="Amplia uma imagem menor do jogo para a janela; com resolução 720p aumenta os FPS.">
           <Toggle value={ini.fsr1 === "1"} onChange={(v) => setIni("fsr1", v)} label="Ampliar com FSR 1" />
@@ -42,7 +44,7 @@ export function DisplayPage({ state, refresh }: P) {
             aria-label="Intensidade da nitidez" />
         </Field>
       </Section>
-      <Section title="Sobreposição">
+      <Section title={t("Show the FPS counter")}>
         <Field label="Mostrar sobreposição de desempenho"
                hint="Itens, tamanho e canto: menu do jogo (Insert / R3+L2) › Sobreposição.">
           <Toggle value={ini.show_fps === "1"} onChange={(v) => setIni("show_fps", v)}
@@ -55,22 +57,23 @@ export function DisplayPage({ state, refresh }: P) {
 
 /* ---------- Gráficos experimentais (build_graphics) ---------- */
 export function GraphicsPage({ state, refresh }: P) {
+  const { t } = useI18n()
   const { run, error } = useSaver(refresh)
   const ini = state.ini
   const setIni = (k: string, v: string | boolean) => run(() => bridge.setIni({ [k]: v }))
   const setApp = (k: string, v: boolean) => run(() => bridge.setApp({ [k]: v }))
   return (
     <div className="settings">
-      <h1>Gráficos (experimental)</h1>
+      <h1>{t("Graphics")}</h1>
       {error && <p className="op-error">{error}</p>}
-      <Section title="Experimental">
+      <Section title={t("Upscaling")}>
         <Field label="Ativar o upscaler (experimental)" restart
                hint="Desligado (padrão): o jogo roda sem upscaling temporal. Estes upscalers ainda não estão calibrados para este jogo: espere ghosting ou cintilação. FSR 3.1 não exige mais nada; FSR 4 precisa dos arquivos abaixo.">
           <Toggle value={!!state.app.experimental_upscaler}
             onChange={(v) => setApp("experimental_upscaler", v)} label="Ativar o upscaler" />
         </Field>
       </Section>
-      <Section title="Upscaling">
+      <Section title={t("Upscaling")}>
         <Field label="Upscaler"
                hint="Upscaling temporal com os vetores de movimento do próprio jogo. FSR 4 exige GPU com INT8; sem isso o jogo volta ao FSR 3.1 sozinho.">
           <Dropdown value={ini.upscaler ?? "fsr4"} choices={state.choices.upscaler}
@@ -116,6 +119,7 @@ export function GraphicsPage({ state, refresh }: P) {
 
 /* ---------- Desempenho (build_performance) ---------- */
 export function PerformancePage({ state, refresh }: P) {
+  const { t } = useI18n()
   const { run, error } = useSaver(refresh)
   const ini = state.ini
   const app = state.app
@@ -123,9 +127,9 @@ export function PerformancePage({ state, refresh }: P) {
   const setApp = (k: string, v: string | boolean) => run(() => bridge.setApp({ [k]: v }))
   return (
     <div className="settings">
-      <h1>Desempenho</h1>
+      <h1>{t("Performance")}</h1>
       {error && <p className="op-error">{error}</p>}
-      <Section title="Taxa de quadros">
+      <Section title={t("Frame rate")}>
         <Field label="Limite de quadros" hint="A taxa do motor (abaixo) é o teto.">
           <Dropdown value={ini.fps_limit ?? "0"} choices={state.choices.fps_limit}
             onChange={(v) => setIni("fps_limit", v)} label="Limite de quadros" />
@@ -144,7 +148,7 @@ export function PerformancePage({ state, refresh }: P) {
             onChange={(v) => setIni("render_resolution", v)} label="Resolução de renderização" />
         </Field>
       </Section>
-      <Section title="Shaders">
+      <Section title={t("Graphics")}>
         <Field label="Cache de pipelines (teste A/B)" restart
                hint="Reaproveita pipelines Vulkan salvos. Desligue para comparar FPS com a compilação normal.">
           <Toggle value={app.pipeline_binary_cache !== false}
@@ -166,7 +170,7 @@ export function PerformancePage({ state, refresh }: P) {
             onChange={(v) => setApp("parallel_warmup", v)} label="Carregamento paralelo" />
         </Field>
       </Section>
-      <Section title="Dados da GPU">
+      <Section title={t("Graphics")}>
         <Field label="Placa de vídeo" restart
                hint="A GPU em que o jogo roda. Escolha a dedicada se o jogo usar a integrada.">
           <Dropdown value={String(app.gpu_id ?? "")} choices={state.choices.gpu_id}
@@ -208,6 +212,7 @@ export function PerformancePage({ state, refresh }: P) {
 
 /* ---------- Jogo (build_game) ---------- */
 export function GamePage({ state, refresh }: P) {
+  const { t } = useI18n()
   const { run, error } = useSaver(refresh)
   const [backup, setBackup] = useState("")
   const [backupMsg, setBackupMsg] = useState("")
@@ -226,9 +231,9 @@ export function GamePage({ state, refresh }: P) {
   })
   return (
     <div className="settings">
-      <h1>Jogo</h1>
+      <h1>{t("Game & effects")}</h1>
       {error && <p className="op-error">{error}</p>}
-      <Section title="Trapaças">
+      <Section title={t("Game & effects")}>
         <Field label="Saltos duplos infinitos" hint="Repetir saltos no ar sem pousar. Também no menu de trapaças do jogo.">
           <Toggle value={ini.cheat_double_jumps === "1"} onChange={(v) => setIni("cheat_double_jumps", v)}
             label="Saltos duplos infinitos" />
@@ -239,7 +244,7 @@ export function GamePage({ state, refresh }: P) {
             label="Desbloquear Muito Difícil" />
         </Field>
       </Section>
-      <Section title="Pastas">
+      <Section title={t("Game folder not set")}>
         <Field label="Pasta do jogo" hint="Seu dump do jogo (eboot.bin, sce_module, sce_sys): qualquer região e versão.">
           <PathField value={String(app.game_dir ?? "")} onPick={() => pickFolderAndSet("game_dir", refresh)} />
         </Field>
@@ -251,19 +256,19 @@ export function GamePage({ state, refresh }: P) {
           <PathField value={String(app.user_dir ?? "")} onPick={() => pickFolderAndSet("user_dir", refresh)} />
         </Field>
       </Section>
-      <Section title="Saves">
+      <Section title={t("Mods & patches")}>
         <Field label={`Backups de saves (últimos ${state.backups.keep})`}
                hint="Feitos antes de cada início, do mais novo ao mais velho. Restaurar copia os saves atuais primeiro.">
           <span className="inline-row">
             <Dropdown value={backup || state.backups.names[0] || ""} choices={
               state.backups.names.map((n) => ({ value: n, label: n }))}
               onChange={setBackup} label="Backup" />
-            <ActionButton onClick={restore} disabled={busy || !(backup || state.backups.names[0])}>Restaurar</ActionButton>
+            <ActionButton onClick={restore} disabled={busy || !(backup || state.backups.names[0])}>{t("Play")}</ActionButton>
           </span>
         </Field>
         {backupMsg && <p className="op-ok">{backupMsg}</p>}
       </Section>
-      <Section title="Idioma">
+      <Section title={t("Language")}>
         <Field label="Idioma do jogo">
           <Dropdown value={String(app.language ?? "1")} choices={state.choices.language}
             onChange={(v) => run(() => bridge.setApp({ language: v }))} label="Idioma do jogo" />
@@ -275,6 +280,7 @@ export function GamePage({ state, refresh }: P) {
 
 /* ---------- Patches (build_patches) ---------- */
 export function PatchesPage({ state, refresh }: P) {
+  const { t } = useI18n()
   const { run, error } = useSaver(refresh)
   const p = state.patches
   const toggleBuiltin = (name: string, on: boolean) => {
@@ -289,7 +295,7 @@ export function PatchesPage({ state, refresh }: P) {
   }
   return (
     <div className="settings">
-      <h1>Patches</h1>
+      <h1>{t("Mods & patches")}</h1>
       {error && <p className="op-error">{error}</p>}
       <p className="page-intro">Mudanças aplicadas ao código do jogo ao iniciar.</p>
       <Section title={`Patches do jogo${p.version ? ` · ${p.title_id} · versão ${p.version}` : ""}`}>
@@ -301,7 +307,7 @@ export function PatchesPage({ state, refresh }: P) {
         ))}
         <p className="field-hint">Resolução e taxa de quadros seguem a página Desempenho.</p>
       </Section>
-      <Section title="Patches de terceiros">
+      <Section title={t("Mods & patches")}>
         <Field label="Pasta de patches"
                hint="Arquivos XML de patch shadPS4/GoldHEN para esta versão do jogo.">
           <PathField value={String(state.app.patches_dir ?? "")} onPick={() => pickFolderAndSet("patches_dir", refresh)} />
@@ -312,7 +318,7 @@ export function PatchesPage({ state, refresh }: P) {
             <Toggle value={e.enabled} onChange={(v) => toggleExternal(e.key, v)} label={e.key} />
           </Field>
         ))}
-        <ActionButton onClick={() => refresh()}>Atualizar</ActionButton>
+        <ActionButton onClick={() => refresh()}>{t("Log")}</ActionButton>
       </Section>
     </div>
   )
@@ -320,6 +326,7 @@ export function PatchesPage({ state, refresh }: P) {
 
 /* ---------- Mods (build_mods) ---------- */
 export function ModsPage({ state, refresh }: P) {
+  const { t } = useI18n()
   const { run, error } = useSaver(refresh)
   const m = state.mods
   const [preset, setPreset] = useState("")
@@ -335,10 +342,10 @@ export function ModsPage({ state, refresh }: P) {
                                : [...new Set([...m.disabled, name])]))
   return (
     <div className="settings">
-      <h1>Mods</h1>
+      <h1>{t("Mods")}</h1>
       {error && <p className="op-error">{error}</p>}
       <p className="page-intro">Arquivos sobrepostos ao jogo ao iniciar; os arquivos do jogo nunca mudam.</p>
-      <Section title="Mods">
+      <Section title={t("Mods & patches")}>
         <Field label="Carregar mods" hint="Mods de arquivos soltos, cada um em sua pasta com dvdroot_ps4.">
           <Toggle value={state.app.mods_enabled !== false}
             onChange={(v) => run(() => bridge.setApp({ mods_enabled: v }))} label="Carregar mods" />
@@ -371,7 +378,7 @@ export function ModsPage({ state, refresh }: P) {
             <input className="text" placeholder="nome do preset" value={preset} onChange={(e) => setPreset(e.target.value)} />
           </div>
         )}
-        <ActionButton onClick={() => refresh()}>Atualizar</ActionButton>
+        <ActionButton onClick={() => refresh()}>{t("Log")}</ActionButton>
       </Section>
     </div>
   )
@@ -379,6 +386,7 @@ export function ModsPage({ state, refresh }: P) {
 
 /* ---------- Controles (build_controls) ---------- */
 export function ControlsPage({ state, refresh }: P) {
+  const { t } = useI18n()
   const { run, error } = useSaver(refresh)
   const c = state.controls
   const [rows, setRows] = useState(c.rows)
@@ -395,10 +403,10 @@ export function ControlsPage({ state, refresh }: P) {
   const reset = () => save(c.rows.map((r) => ({ ...r, key: r.default_key, pad: r.default_pad })), style)
   return (
     <div className="settings">
-      <h1>Controles</h1>
+      <h1>{t("Gamepad names")}</h1>
       {error && <p className="op-error">{error}</p>}
       <p className="page-intro">Qual tecla ou botão do controle aperta cada botão do jogo.</p>
-      <Section title="Nomes do controle">
+      <Section title={t("Gamepad names")}>
         <span className="inline-row">
           {(["playstation", "xbox"] as const).map((s) => (
             <label key={s} className={"radio" + (style === s ? " on" : "")}>
@@ -408,7 +416,7 @@ export function ControlsPage({ state, refresh }: P) {
           ))}
         </span>
       </Section>
-      <Section title="Mapeamento">
+      <Section title={t("Gamepad names")}>
         <div className="controls-table">
           <span className="th">BOTÃO DO JOGO</span><span className="th">TECLADO</span><span className="th">CONTROLE</span>
           {rows.map((r) => (
@@ -440,6 +448,7 @@ export function ControlsPage({ state, refresh }: P) {
 
 /* ---------- Avançado (build_advanced) ---------- */
 export function AdvancedPage({ state, refresh }: P) {
+  const { t } = useI18n()
   const { run, error } = useSaver(refresh)
   const app = state.app
   const [updateMsg, setUpdateMsg] = useState("")
@@ -456,18 +465,18 @@ export function AdvancedPage({ state, refresh }: P) {
   })
   return (
     <div className="settings">
-      <h1>Avançado</h1>
+      <h1>{t("Advanced")}</h1>
       {error && <p className="op-error">{error}</p>}
-      <Section title="Launcher">
-        <Field label="Idioma do launcher" hint="Aplica-se quando o launcher abrir de novo.">
+      <Section title={t("Advanced")}>
+        <Field label={t("Language")} hint="Aplica-se quando o launcher abrir de novo.">
           <Dropdown value={String(app.ui_language ?? "en")} choices={state.choices.ui_language}
             onChange={(v) => setApp("ui_language", v)} label="Idioma do launcher" />
         </Field>
-        <Field label="Fechar o launcher ao iniciar o jogo">
+        <Field label={t("Stop")}>
           <Toggle value={!!app.close_on_play} onChange={(v) => setApp("close_on_play", v)}
             label="Fechar ao iniciar" />
         </Field>
-        <Field label="Verificar atualizações ao abrir o launcher">
+        <Field label={t("Stop")}>
           <Toggle value={!!app.check_updates} onChange={(v) => setApp("check_updates", v)}
             label="Verificar atualizações" />
         </Field>
@@ -477,7 +486,7 @@ export function AdvancedPage({ state, refresh }: P) {
         </div>
         {updateMsg && <p className="op-ok">{updateMsg}</p>}
       </Section>
-      <Section title="Arquivos">
+      <Section title={t("Log")}>
         <div className="inline-row">
           <ActionButton onClick={() => bridge.openInExplorer(String(state.app.user_dir || ""))}>Pasta de saves</ActionButton>
           <ActionButton onClick={() => bridge.openInExplorer("gow3.ini")}>gow3.ini</ActionButton>
@@ -488,7 +497,7 @@ export function AdvancedPage({ state, refresh }: P) {
         </div>
         {cacheMsg && <p className="op-ok">{cacheMsg}</p>}
       </Section>
-      <Section title="Diagnóstico (desenvolvimento)">
+      <Section title={t("Log")}>
         <Field label="Estatísticas de quadros no log (a cada 5 s)">
           <Toggle value={!!app.frame_stats} onChange={(v) => setApp("frame_stats", v)} label="Estatísticas" />
         </Field>
@@ -515,6 +524,7 @@ export function AdvancedPage({ state, refresh }: P) {
 
 /* ---------- Registro (build_log) ---------- */
 export function LogPage(_props: P) {
+  const { t } = useI18n()
   const [text, setText] = useState("")
   const [source, setSource] = useState("")
   const load = () => bridge.logRead().then((r) => {
@@ -525,9 +535,9 @@ export function LogPage(_props: P) {
   useEffect(() => { void load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="settings log-page">
-      <h1>Registro</h1>
+      <h1>{t("Log")}</h1>
       <div className="inline-row">
-        <ActionButton onClick={load}>Atualizar</ActionButton>
+        <ActionButton onClick={load}>{t("Log")}</ActionButton>
         <ActionButton onClick={() => navigator.clipboard?.writeText(text)}>Copiar</ActionButton>
       </div>
       <pre className="log" aria-label="Log de execução">{text || "Sem registros ainda — o log da execução aparece aqui durante e após iniciar o jogo."}</pre>

@@ -68,6 +68,7 @@ export interface BridgeState {
   controls: ControlsState
   fsr4: { installed: number; total: number; missing: number; folder: string }
   running: boolean
+  translations: Record<string, Record<string, string>>
 }
 
 export interface PlayStatus {

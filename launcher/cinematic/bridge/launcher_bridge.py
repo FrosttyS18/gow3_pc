@@ -168,6 +168,29 @@ def all_choices(app: dict) -> dict:
     return c
 
 
+def _resolve_patches_dir(app: dict) -> Path:
+    """Pasta de patches: a configuração explícita vence; vazio = a pasta do PORT_DIR
+    (como o Tkinter). Se o PORT_DIR/patches só tem o XML interno (worktree dev),
+    procura também no pacote oficial instalado (Downloads), que é de onde o launcher
+    Tkinter do mantenedor resolve os patches de terceiros na prática."""
+    explicit = app.get("patches_dir")
+    if explicit:
+        return Path(explicit)
+    local = L.DATA_DIR / "patches"
+    if any(p.suffix == ".xml" and "God_of_War" not in p.name for p in local.glob("*.xml")):
+        return local  # tem XML de terceiro: usa a própria pasta
+    # procura o pacote ( Downloads/gow3-windows*/gow3-windows/patches )
+    for downloads in [L.Path.home() / "Downloads", L.Path(os.environ.get("USERPROFILE", "")) / "Downloads"]:
+        if not downloads.is_dir():
+            continue
+        for pkg in downloads.glob("gow3-windows*"):
+            for nested in (pkg, pkg / "gow3-windows"):
+                patches = nested / "patches"
+                if patches.is_dir() and any(p.suffix == ".xml" for p in patches.glob("*.xml")):
+                    return patches
+    return local
+
+
 def patches_state(app: dict) -> dict:
     import xml.etree.ElementTree as ET
     from patches import EXCLUSIVE_PREFIX
@@ -189,14 +212,18 @@ def patches_state(app: dict) -> dict:
     from patches import external_patches
     ext = []
     if profile:
-        root = Path(app.get("patches_dir") or L.DATA_DIR / "patches")
+        root = _resolve_patches_dir(app)
         chosen = L.load_json(L.DATA_DIR / "patches.json", {})
+        builtin_xml = profile[1].name if profile else ""  # não listar o XML interno como "externo"
         for key, _path, meta in external_patches(root, profile[2], profile[1], profile[0]):
+            if _path.name == builtin_xml:
+                continue  # cópia do XML interno na pasta de patches: o Tkinter só lista terceiros
             on = key in chosen.get("enabled", []) or (key not in chosen.get("disabled", [])
                                                       and meta.get("isEnabled", "false").lower() == "true")
             ext.append({"key": key, "author": meta.get("Author"), "enabled": on})
     return {"title_id": title_id, "version": (profile[2] if profile else None),
-            "builtin": builtin, "external": ext}
+            "builtin": builtin, "external": ext,
+            "patches_dir_resolved": str(root) if profile else None}
 
 
 def mods_state(app: dict) -> dict:
@@ -239,6 +266,20 @@ def fsr4_state() -> dict:
             "folder": str(L.fsr4_folder())}
 
 
+def translations_state() -> dict:
+    """Tabelas de tradução oficiais (gow3_lang.table) por idioma — EN é a chave."""
+    import gow3_lang
+    tables = {}
+    for code, _names in gow3_lang.LANGUAGE_NAMES:
+        if not code:
+            continue
+        try:
+            tables[code] = gow3_lang.table(code)
+        except ValueError:
+            pass  # idioma incompleto no upstream: não expõe tabela parcial
+    return tables
+
+
 def cmd_state() -> dict:
     app = app_settings()
     ini, _lines = L.load_ini()
@@ -257,6 +298,7 @@ def cmd_state() -> dict:
         "controls": controls_state(app),
         "fsr4": fsr4_state(),
         "running": game_running(),
+        "translations": translations_state(),
     }
 
 

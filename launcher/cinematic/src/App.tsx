@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { bridge, BridgeState } from "./bridge"
+import { I18nContext, LangTable, translate } from "./i18n"
 import { PAGES } from "./components/pages"
 import { NavMenu } from "./components/NavMenu"
 import { PlayButton, PlayPhase } from "./components/PlayButton"
@@ -12,32 +13,41 @@ export type Page = "home" | (typeof PAGES)[number]["id"]
 export default function App() {
   const [state, setState] = useState<BridgeState | null>(null)
   const [page, setPage] = useState<Page>("home")
-  const [musicMuted, setMusicMuted] = useState(true)
   const [phase, setPhase] = useState<PlayPhase>("idle")
   const [playError, setPlayError] = useState("")
   const [bridgeError, setBridgeError] = useState("")
+  const [musicMuted, setMusicMuted] = useState(true)
+  const [language, setLanguageState] = useState("en")
   const startedAt = useRef(0)
   const hiddenForPlay = useRef(false)
 
   const refresh = useCallback(() => {
-    bridge.state().then(setState).catch((e) => setBridgeError(String(e.message ?? e)))
+    bridge.state().then((s) => {
+      setState(s)
+      setLanguageState(String(s.app.ui_language ?? "en"))
+    }).catch((e) => setBridgeError(String(e.message ?? e)))
   }, [])
 
   useEffect(() => { refresh() }, [refresh])
   useEffect(() => { if (state) setMusicMuted(state.music.muted) }, [state?.music.muted]) // eslint-disable-line react-hooks/exhaustive-deps
-  useAmbientMusic(state?.music, musicMuted)
+  useAmbientMusic(state?.music, musicMuted, phase)
 
-  // Música é uma AÇÃO do menu: alterna o mute, persiste SÓ essa preferência e
-  // não muda a página corrente (volume é fixo em 5% — sem slider, sem painel).
-  const toggleMusic = () => {
-    const next = !musicMuted
-    setMusicMuted(next)
-    bridge.setApp({ ambient_muted: next }).catch((e) => console.error("ambient_muted", e))
-  }
+  // i18n: troca IMEDIATA (sem reiniciar); a ponte grava só quando o usuário muda
+  const setLanguage = useCallback((next: string) => {
+    setLanguageState(next)
+    bridge.setApp({ ui_language: next }).catch((e) => console.error("ui_language", e))
+  }, [])
+  const i18n = useMemo(() => {
+    const table: LangTable = state?.translations?.[language] ?? {}
+    return {
+      language,
+      setLanguage,
+      t: (english: string, ...args: (string | number)[]) => translate(table, english, ...args),
+      tables: state?.translations ?? {},
+    }
+  }, [language, state?.translations, setLanguage])
 
-  // Poll do processo: preparing -> running -> finished/error pelo CÓDIGO DE SAÍDA REAL
-  // gravado pelo monitor (não por palavras no log). Falhas de polling repetidas
-  // aparecem para o usuário em vez de morrerem no console.
+  // Poll do processo pelo CÓDIGO DE SAÍDA REAL
   useEffect(() => {
     if (phase !== "preparing" && phase !== "running") return
     let failures = 0
@@ -49,7 +59,7 @@ export default function App() {
         if (status.running) {
           setPhase(Date.now() - startedAt.current > 6000 ? "running" : "preparing")
         } else if (status.outcome === "unknown" && Date.now() - startedAt.current < 8000) {
-          return  // monitor ainda escrevendo o pid
+          return
         } else {
           if (status.outcome === "error") {
             setPhase("error")
@@ -79,18 +89,23 @@ export default function App() {
     return () => clearInterval(timer)
   }, [phase, refresh])
 
+  // Música é uma AÇÃO do menu
+  const toggleMusic = () => {
+    const next = !musicMuted
+    setMusicMuted(next)
+    bridge.setApp({ ambient_muted: next }).catch((e) => console.error("ambient_muted", e))
+  }
+
   const onPlay = async () => {
     if (!state?.game.found || phase === "preparing" || phase === "running") return
     setPlayError("")
     setPhase("preparing")
     startedAt.current = Date.now()
+    // P0 M1.7: a música PARA ANTES de qualquer operação da ponte — determinístico
+    window.dispatchEvent(new CustomEvent("gow3:stop-music"))
     try {
-      await bridge.play()  // spawn aceito (validações incluídas): só agora o fade
+      await bridge.play()
       window.dispatchEvent(new CustomEvent("gow3:fade-music"))
-      // Conflito close_on_play × supervisão de processo (Job): fechar o launcher
-      // agora MATARIA o jogo (regra definitiva M1.6). Em vez disso a janela se
-      // OCULTA e o launcher sai quando o jogo terminar. Config original preservada;
-      // comportamento final pendente de decisão do mantenedor.
       if (state?.app.close_on_play) {
         await (window as unknown as { __TAURI__?: { window: { getCurrentWindow: () => { hide(): Promise<void> } } } })
           .__TAURI__?.window.getCurrentWindow().hide()
@@ -102,51 +117,46 @@ export default function App() {
     }
   }
 
+  const active = PAGES.find((p) => p.id === page)
 
   return (
-    <div className="app">
-      <div className="art">
-        <img src="art/bg-launcher.png" alt="" draggable={false}
-          onError={(e) => { (e.target as HTMLImageElement).style.display = "none" }} />
+    <I18nContext.Provider value={i18n}>
+      <div className="app">
+        <div className="art">
+          <img src="art/bg-launcher.png" alt="" draggable={false}
+            onError={(e) => { (e.target as HTMLImageElement).style.display = "none" }} />
+        </div>
+        <TitleBar />
+        <div className="logo" aria-label={i18n.t("Play")} role="button" tabIndex={0}
+          onClick={() => setPage("home")}
+          onKeyDown={(e) => { if (e.key === "Enter") setPage("home") }}>
+          <img src="art/logo-gow-3.png" alt="God of War III"
+            onError={(e) => {
+              (e.target as HTMLImageElement).style.display = "none"
+              const el = document.createElement("span")
+              el.className = "fallback"
+              el.textContent = "GOD OF WAR III"
+              ;(e.target as HTMLImageElement).parentElement?.appendChild(el)
+            }} />
+        </div>
+        <NavMenu page={page} onNavigate={setPage} musicMuted={musicMuted} onToggleMusic={toggleMusic} />
+        {state && (
+          <>
+            <StatusBar
+              summary={state.game.summary}
+              missing={state.game.missing_files}
+              bridgeError={bridgeError}
+            />
+            <PlayButton
+              phase={phase}
+              available={state.game.found}
+              error={playError}
+              onPlay={onPlay}
+            />
+          </>
+        )}
+        {active && state && <div className="page-host">{active.component({ state, refresh })}</div>}
       </div>
-      <TitleBar />
-      <div className="logo" aria-label="Início" role="button" tabIndex={0} onClick={() => setPage("home")}
-        onKeyDown={(e) => { if (e.key === "Enter") setPage("home") }}>
-        <img src="art/logo-gow-3.png" alt="God of War III"
-          onError={(e) => {
-            (e.target as HTMLImageElement).style.display = "none"
-            const el = document.createElement("span")
-            el.className = "fallback"
-            el.textContent = "GOD OF WAR III"
-            ;(e.target as HTMLImageElement).parentElement?.appendChild(el)
-          }} />
-      </div>
-      <NavMenu page={page} onNavigate={setPage} musicMuted={musicMuted} onToggleMusic={toggleMusic} />
-      {state && (
-        <>
-          <StatusBar
-            summary={state.game.summary}
-            missing={state.game.missing_files}
-            bridgeError={bridgeError}
-          />
-          <PlayButton
-            phase={phase}
-            available={state.game.found}
-            error={playError}
-            onPlay={onPlay}
-          />
-        </>
-      )}
-      {(() => {
-        const active = PAGES.find((p) => p.id === page)
-        if (!active || !state) return null
-        const Page = active.component
-        return (
-          <div className="page-host">
-            <Page state={state} refresh={refresh} />
-          </div>
-        )
-      })()}
-    </div>
+    </I18nContext.Provider>
   )
 }
