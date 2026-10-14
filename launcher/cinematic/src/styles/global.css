@@ -1,6 +1,5 @@
-/* God of War III — cinematic launcher (M1.1).
-   Medidas OFICIAIS dos frames Figma 1920x1080, escaladas para o viewport de
-   referencia 1280x720 (fator 2/3). Paleta: cores do proprio port. */
+/* God of War III — cinematic launcher (M1.2).
+   Medidas OFICIAIS dos frames Figma 1920x1080 escaladas ao viewport 1280x720 (2/3). */
 
 :root {
   --bg: #0d0b0b;
@@ -11,10 +10,11 @@
   --muted: #8a817a;
   --accent: #a4161a;
   --accent-hi: #c81e25;
+  --figma-red: #9f0000;
   --warm: #fff4dc;
   --font: "Segoe UI", sans-serif;
   --font-light: "Segoe UI Light", "Segoe UI Semilight", "Segoe UI", sans-serif;
-  --axis: 88.8%;            /* eixo central Figma: 1705.5/1920 */
+  --axis: 88.8%;
   --hover-ms: 200ms;
   --hover-ease: cubic-bezier(0.2, 0.7, 0.3, 1);
 }
@@ -22,10 +22,9 @@
 * { box-sizing: border-box; user-select: none; }
 html, body, #root { height: 100%; margin: 0; }
 body { font-family: var(--font); color: var(--text); background: var(--bg); }
-
 .app { position: relative; height: 100vh; overflow: hidden; }
 
-/* ---- background art (1920x1080 em viewport 16:9: cover sem cortes) ---------- */
+/* ---- background art --------------------------------------------------------- */
 .art { position: absolute; inset: 0; background: var(--bg); }
 .art img {
   position: absolute; inset: 0; width: 100%; height: 100%;
@@ -40,8 +39,6 @@ body { font-family: var(--font); color: var(--text); background: var(--bg); }
   53% { filter: brightness(1.12); }
   56% { filter: brightness(1); }
 }
-/* escurecimento sutil SOMENTE para legibilidade da navegacao (a arte nova ja e
-   escura a direita; sem camadas artificiais) */
 .art::after {
   content: ""; position: absolute; inset: 0;
   background:
@@ -50,7 +47,7 @@ body { font-family: var(--font); color: var(--text); background: var(--bg); }
       rgba(13, 11, 11, 0) 78%, rgba(13, 11, 11, 0.55) 100%);
 }
 
-/* ---- window chrome (frameless) -------------------------------------------- */
+/* ---- window chrome ----------------------------------------------------------- */
 .titlebar {
   position: absolute; top: 0; left: 0; right: 0; height: 32px;
   display: flex; justify-content: flex-end; align-items: center; z-index: 40;
@@ -63,7 +60,7 @@ body { font-family: var(--font); color: var(--text); background: var(--bg); }
 .titlebar .glyph:hover { color: var(--text); background: rgba(230, 224, 216, 0.07); }
 .titlebar .glyph.close:hover { color: #fff; background: var(--accent-hi); }
 
-/* ---- logo (eixo 88.8%; topo ~13.2% do frame) ------------------------------- */
+/* ---- logo --------------------------------------------------------------------- */
 .logo {
   position: absolute; top: 13.2%; left: var(--axis);
   transform: translateX(-50%);
@@ -76,16 +73,12 @@ body { font-family: var(--font); color: var(--text); background: var(--bg); }
   text-shadow: 0 0 22px rgba(200, 30, 37, 0.45);
 }
 
-/* ---- menu vertical (Figma: 27.7333px/34 -> 18.49px/22.67px @720;
-        intervalo entre inicios 66.18 -> 44.12px; ativo 38.4688/47 ->
-        25.65px/32px; reflow dos seguintes +14px -> +9.33px) ------------------ */
+/* ---- menu vertical (hover SEM clique = tamanho do Figma) ----------------------- */
 .nav {
-  /* topo FIXO no y do frame inativo (26.8%): o item ativo cresce e empurra os
-     seguintes pelos 9.33px completos do reflow do Figma (sem re-centralizar) */
-  position: absolute; left: var(--axis); top: 26.8%;
+  position: absolute; left: var(--axis); top: 24%;
   transform: translateX(-50%);
   display: flex; flex-direction: column; align-items: center;
-  gap: 21.45px;                    /* 44.12 - 22.67 */
+  gap: 16.3px;                    /* intervalo ajustado: 9 itens no mesmo bloco */
   z-index: 10;
 }
 .nav button {
@@ -97,43 +90,37 @@ body { font-family: var(--font); color: var(--text); background: var(--bg); }
   color: #4c4c4c;
   background: transparent; border: 0; padding: 0;
   cursor: pointer; position: relative;
-  transform-origin: center; transform: scale(1);
   transition:
-    transform var(--hover-ms) var(--hover-ease),
+    font-size var(--hover-ms) var(--hover-ease),
+    line-height var(--hover-ms) var(--hover-ease),
     color var(--hover-ms) var(--hover-ease),
-    text-shadow var(--hover-ms) var(--hover-ease),
-    font-size 200ms var(--hover-ease),
-    line-height 200ms var(--hover-ease);
+    text-shadow var(--hover-ms) var(--hover-ease);
 }
-/* hover/foco: acende e cresce ~12% sem empurrar ninguem (transform puro) */
+/* HOVER (sem clique) e foco: cresce até o tamanho do Figma (38,4688px), fica
+   branco e acende. Os vizinhos acompanham o reflow — mesma geometria do frame
+   ampliado. Sem transform/scale: nenhuma ampliação dupla. */
 .nav button:hover,
 .nav button:focus-visible {
-  color: #f5efe4;
-  transform: scale(1.12);
+  color: #ffffff;
+  font-size: 25.65px;
+  line-height: 32px;
   text-shadow:
     0 0 12px rgba(255, 244, 220, 0.55),
     0 0 30px rgba(255, 220, 160, 0.22),
     0 8px 22px rgba(200, 30, 37, 0.16);
   outline: none;
 }
-/* selecionado: maior, branco, e EMPURRA os seguintes (reflow do Figma, +9.33px) */
-.nav button.active {
-  color: #ffffff;
-  font-size: 25.65px;              /* 38.4688 x 2/3 */
-  line-height: 32px;               /* 22.67 -> 32: delta 9.33px de reflow */
-}
-.nav button.active:hover, .nav button.active:focus-visible { transform: scale(1.12); }
-/* linha de selecao: 328.55x1.18 -> 219x1px, centrada no eixo, gradiente exato */
+/* SELECIONADO (depois do clique): permanece grande e branco, SEM brilho de hover,
+   com a linha vermelha longa. Hover sobre ele não amplia duas vezes. */
+.nav button.active { color: #ffffff; font-size: 25.65px; line-height: 32px; text-shadow: none; }
 .nav button.active::after {
   content: ""; position: absolute; left: 50%; transform: translateX(-50%);
   bottom: -6px; width: 219px; height: 1px;
   background: linear-gradient(90deg, #000000 0%, #d10000 52.4%, #000000 100%);
 }
 
-/* ---- footer status ---------------------------------------------------------- */
-.statusbar {
-  position: absolute; left: 52px; bottom: 30px; z-index: 10; max-width: 44%;
-}
+/* ---- footer -------------------------------------------------------------------- */
+.statusbar { position: absolute; left: 52px; bottom: 30px; z-index: 10; max-width: 44%; }
 .statusbar .line {
   min-height: 21px; font-size: 15px; letter-spacing: 0.04em;
   color: var(--text); text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
@@ -144,44 +131,25 @@ body { font-family: var(--font); color: var(--text); background: var(--bg); }
   background: linear-gradient(90deg, var(--accent-hi), rgba(164, 22, 26, 0.35) 70%, transparent);
 }
 
-/* ---- musica: glifo discreto no eixo, expande no hover/foco ------------------ */
+/* ---- música ambiente: canto superior esquerdo, mute + volume -------------------- */
 .music {
-  position: absolute; left: var(--axis); bottom: 96px;
-  transform: translateX(-50%);
-  z-index: 10; display: flex; align-items: center; gap: 8px;
-  padding: 5px 8px; border-radius: 8px;
-  border: 1px solid transparent; background: transparent;
-  transition: background var(--hover-ms) ease, border-color var(--hover-ms) ease;
-}
-.music:hover, .music:focus-within {
-  background: rgba(22, 18, 18, 0.55);
-  border-color: rgba(230, 224, 216, 0.10);
+  position: absolute; left: 24px; top: 40px; z-index: 10;
+  display: flex; align-items: center; gap: 10px;
 }
 .music button {
-  background: transparent; border: 0; color: #6d655e; cursor: pointer;
-  display: grid; place-items: center; width: 24px; height: 24px;
+  background: transparent; border: 0; color: rgba(138, 129, 122, 0.85); cursor: pointer;
+  display: grid; place-items: center; width: 26px; height: 26px;
   transition: color var(--hover-ms) ease;
 }
 .music button:hover { color: var(--warm); }
-.music input[type="range"] { width: 84px; accent-color: var(--accent-hi); cursor: pointer; }
-.music .expand {
-  display: flex; align-items: center; gap: 8px;
-  max-width: 0; opacity: 0; overflow: hidden;
-  transition: max-width var(--hover-ms) var(--hover-ease), opacity var(--hover-ms) ease;
-}
-.music:hover .expand, .music:focus-within .expand { max-width: 200px; opacity: 1; }
+.music input[type="range"] { width: 88px; accent-color: var(--accent-hi); cursor: pointer; }
+.music[data-has-audio="no"] input[type="range"] { opacity: 0.4; }
 
-/* ---- JOGAR (Figma: 278.76x69 r4.90667 @1080 -> 186x46 r3.3 @720;
-        centro no eixo 88.8%; y=963 -> bottom 32px) --------------------------- */
-.play {
-  position: absolute; left: var(--axis); bottom: 32px;
-  transform: translateX(-50%);
-  z-index: 12;
-}
+/* ---- JOGAR ---------------------------------------------------------------------- */
+.play { position: absolute; left: var(--axis); bottom: 32px; transform: translateX(-50%); z-index: 12; }
 .play .btn {
   font-family: var(--font-light); font-weight: 300;
-  font-size: 21.6px;                /* 32.384 x 2/3 */
-  letter-spacing: normal; color: #747474;
+  font-size: 21.6px; letter-spacing: normal; color: #747474;
   display: inline-flex; align-items: center; justify-content: center; gap: 13px;
   width: 186px; height: 46px; border-radius: 3.3px;
   background: #0b0b0b;
@@ -212,9 +180,8 @@ body { font-family: var(--font); color: var(--text); background: var(--bg); }
 .play .err .btn { border-color: rgba(200, 30, 37, 0.5); }
 .play .err .sub { color: var(--accent-hi); }
 
-/* ---- painel de vidro (Figma: x34 y57 1491x906 r24 rgba(0,0,0,.2) @1080
-        -> x23 y38 994x604 r16 @720) ------------------------------------------- */
-.panel {
+/* ---- painel de vidro (todas as páginas; Figma x34 y57 1491x906 r24 @1080) ------- */
+.page-host {
   position: absolute; left: 23px; top: 38px;
   width: 994px; height: 604px;
   z-index: 20;
@@ -222,57 +189,147 @@ body { font-family: var(--font); color: var(--text); background: var(--bg); }
   border-radius: 16px;
   backdrop-filter: blur(12px) brightness(0.78);
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
-  padding: 32px 40px;
-  overflow-y: auto;
 }
-.panel h1 {
-  margin: 0 0 6px; font-family: var(--font-light); font-size: 27px; font-weight: 300;
+.settings { height: 100%; overflow-y: auto; padding: 30px 40px 36px; }
+.settings::-webkit-scrollbar { width: 8px; }
+.settings::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+.settings h1 {
+  margin: 0 0 4px; font-family: var(--font-light); font-size: 27px; font-weight: 300;
   letter-spacing: 0.06em; color: var(--warm);
-  text-shadow: 0 0 18px rgba(255, 214, 150, 0.2);
 }
-.panel .hint { margin: 0 0 26px; color: var(--muted); font-size: 14px; letter-spacing: 0.03em; }
-.panel .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 26px 34px; }
-.panel .field label {
-  display: block; font-size: 14px; letter-spacing: 0.1em; text-transform: uppercase;
-  color: var(--muted); margin-bottom: 10px;
+.page-intro { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
+.settings-section { margin-top: 20px; }
+.settings-section h2 {
+  margin: 0 0 4px; font-size: 13px; font-weight: 600; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--muted);
+  border-bottom: 1px solid var(--line); padding-bottom: 6px;
 }
-.panel select {
-  width: 100%; font-family: var(--font); font-size: 17px; color: var(--text);
-  background: var(--card); border: 1px solid var(--line); border-radius: 8px;
-  padding: 10px 12px; cursor: pointer;
-  transition: border-color var(--hover-ms) ease, box-shadow var(--hover-ms) ease;
+.settings-section-body { display: flex; flex-direction: column; gap: 10px; padding-top: 10px; }
+
+/* ---- campos ---------------------------------------------------------------------- */
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field-head { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.field-head label { font-size: 15px; color: var(--text); }
+.field-hint { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--muted); max-width: 640px; }
+.inline-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.op-error { color: #e08080; font-size: 13px; margin: 4px 0; }
+.op-ok { color: #9ec49e; font-size: 13px; margin: 4px 0; }
+.version { color: var(--muted); font-size: 12.5px; }
+
+/* toggle Figma: 66x33, raio 14.5, OFF preto/borda #9F0000, ON #9F0000 */
+.toggle {
+  position: relative; width: 66px; height: 33px; border-radius: 15px;
+  background: #000000; border: 1px solid var(--figma-red);
+  display: inline-flex; align-items: center; padding: 2px;
+  cursor: pointer; flex: 0 0 auto;
+  transition: background var(--hover-ms) var(--hover-ease);
 }
-.panel select:hover, .panel select:focus {
-  border-color: rgba(200, 30, 37, 0.6); outline: none;
-  box-shadow: 0 0 16px rgba(200, 30, 37, 0.18);
+.toggle .knob {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--figma-red); color: #ffffff;
+  display: grid; place-items: center;
+  transition: transform var(--hover-ms) var(--hover-ease), background var(--hover-ms) var(--hover-ease), color var(--hover-ms) var(--hover-ease);
 }
-.segmented { display: flex; gap: 8px; flex-wrap: wrap; }
-.segmented button {
-  flex: 1 1 auto; font-family: var(--font); font-size: 15.5px; color: var(--text);
-  background: var(--card); border: 1px solid var(--line); border-radius: 8px;
-  padding: 9px 14px; cursor: pointer; white-space: nowrap;
-  transition: border-color var(--hover-ms) ease, box-shadow var(--hover-ms) ease, color var(--hover-ms) ease;
+.toggle .state {
+  position: absolute; right: 12px; font-family: var(--font-light); font-size: 10.5px;
+  color: #ffffff; letter-spacing: 0.04em;
 }
-.segmented button:hover { border-color: rgba(230, 224, 216, 0.35); }
-.segmented button.on {
-  color: var(--warm); border-color: var(--accent-hi);
-  box-shadow: 0 0 14px rgba(200, 30, 37, 0.22), inset 0 0 10px rgba(200, 30, 37, 0.1);
+.toggle.on { background: var(--figma-red); border-color: #000000; }
+.toggle.on .knob { transform: translateX(33px); background: #ffffff; color: #000000; }
+.toggle:focus-visible { outline: 1px solid rgba(230, 224, 216, 0.4); outline-offset: 2px; }
+
+/* dropdown Figma: 251x33, fundo #000, borda #9F0000, texto branco */
+.dropdown { position: relative; width: 251px; flex: 0 0 auto; }
+.dropdown select {
+  width: 100%; height: 33px; border-radius: 3px;
+  background: #000000; border: 1px solid var(--figma-red);
+  color: #ffffff; font-family: var(--font-light); font-size: 13px;
+  padding: 0 30px 0 12px; cursor: pointer; appearance: none;
 }
-.saved {
-  margin-left: auto; font-size: 12.5px; color: var(--muted); letter-spacing: 0.05em;
-  opacity: 0; transition: opacity 240ms ease;
+.dropdown select:hover, .dropdown select:focus {
+  border-color: var(--accent-hi); outline: none;
+  box-shadow: 0 0 12px rgba(200, 30, 37, 0.25);
 }
-.saved.show { opacity: 1; color: #9ec49e; }
-.panel .soon {
-  margin-top: 34px; padding-top: 22px; border-top: 1px solid var(--line);
-  color: var(--muted); font-size: 13.5px; letter-spacing: 0.04em;
+.dropdown .caret {
+  position: absolute; right: 11px; top: 50%; transform: translateY(-50%);
+  color: #ffffff; pointer-events: none;
 }
 
-/* ---- movimento reduzido ------------------------------------------------------ */
+/* campo de caminho */
+.pathfield {
+  display: flex; align-items: center; gap: 10px; max-width: 470px;
+}
+.pathfield .path {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 13px; color: var(--muted);
+  background: rgba(0, 0, 0, 0.5); border: 1px solid var(--line);
+  border-radius: 3px; padding: 6px 10px;
+}
+.action {
+  font-family: var(--font); font-size: 13px; color: var(--text);
+  background: var(--card); border: 1px solid var(--line); border-radius: 3px;
+  padding: 7px 14px; cursor: pointer; white-space: nowrap;
+  transition: border-color var(--hover-ms) ease, color var(--hover-ms) ease;
+}
+.action:hover:not(:disabled) { border-color: rgba(230, 224, 216, 0.4); color: #fff; }
+.action:disabled { opacity: 0.45; cursor: not-allowed; }
+.action.danger { border-color: rgba(159, 0, 0, 0.55); }
+
+input[type="range"] { accent-color: var(--accent-hi); cursor: pointer; }
+.text {
+  font-family: var(--font); font-size: 13px; color: var(--text);
+  background: rgba(0, 0, 0, 0.5); border: 1px solid var(--line); border-radius: 3px;
+  padding: 7px 10px; min-width: 0;
+}
+.text:focus { border-color: rgba(159, 0, 0, 0.7); outline: none; }
+
+/* mods */
+.mod-row { display: flex; align-items: center; gap: 10px; padding: 3px 0; }
+.mod-index { color: var(--muted); font-size: 13px; width: 22px; text-align: right; }
+.mod-name { flex: 1; font-size: 14px; }
+.mod-move {
+  background: transparent; border: 1px solid var(--line); color: var(--muted);
+  border-radius: 3px; width: 24px; height: 24px; cursor: pointer; font-size: 10px;
+}
+.mod-move:hover { color: var(--warm); border-color: rgba(230, 224, 216, 0.4); }
+.presets { margin-top: 8px; }
+
+/* controles */
+.controls-table { display: flex; flex-direction: column; gap: 6px; }
+.controls-table .th {
+  font-size: 11px; letter-spacing: 0.12em; color: var(--muted);
+  display: grid; grid-template-columns: 200px 210px 240px; gap: 14px;
+}
+.controls-row { display: grid; grid-template-columns: 200px 210px 240px; gap: 14px; align-items: center; }
+.controls-row .ps-name { font-size: 14px; }
+.controls-row .key { width: 100%; }
+.pad-select {
+  width: 100%; height: 31px; border-radius: 3px;
+  background: #000000; border: 1px solid var(--figma-red);
+  color: #ffffff; font-family: var(--font-light); font-size: 13px; padding: 0 10px;
+}
+.fixed { color: var(--muted); font-size: 13px; }
+.radio {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 14px;
+  border: 1px solid var(--line); border-radius: 3px; padding: 6px 12px; cursor: pointer;
+}
+.radio.on { border-color: var(--figma-red); color: var(--warm); }
+.radio input { accent-color: var(--accent-hi); }
+
+/* log */
+.log {
+  flex: 1; margin: 10px 0 0; padding: 10px 12px;
+  background: #0a0808; color: #cfc6bc; border-radius: 6px;
+  font-family: Consolas, "Courier New", monospace; font-size: 12px; line-height: 1.5;
+  overflow: auto; white-space: pre-wrap; user-select: text;
+  min-height: 380px; max-height: 470px;
+}
+.log-page { display: flex; flex-direction: column; }
+
+/* ---- movimento reduzido ----------------------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
   .art img { animation: none; }
-  .nav button, .play .btn, .play .btn svg, .music, .music .expand,
-  .panel select, .segmented button { transition: none; }
+  .nav button, .play .btn, .play .btn svg, .toggle, .toggle .knob,
+  .dropdown select, .action, .mod-move, .panel select { transition: none; }
   .play .dot { animation: none; opacity: 0.8; }
-  .nav button:hover, .nav button:focus-visible { transform: none; }
 }

@@ -2,19 +2,29 @@
 """Typed JSON bridge between the cinematic launcher (Tauri/React) and the port's real logic.
 
 The Python layer stays the single owner of the port's rules: this module only imports
-gow3_launcher_win as a library (it is import-safe: the Tkinter classes receive the tk
-modules as arguments and nothing graphical happens at import time) and exposes a small
-request/response protocol — one JSON object on stdin, one JSON object on stdout.
+gow3_launcher_win as a library (import-safe: the Tkinter classes receive the tk modules
+as arguments) and exposes a request/response protocol — one JSON object on stdin, one
+JSON object on stdout, ALWAYS UTF-8 (stdout is reconfigured; the Rust side spawns this
+process with PYTHONIOENCODING=utf-8 as well).
 
-Commands:
-  state                -> app settings, gow3.ini values, real game status and the footer summary
-  set_ini  {values}    -> writes gow3.ini through save_ini (comments/unknown keys preserved)
-  set_app  {values}    -> merges keys into settings.json (launcher format preserved)
-  play                -> starts run.py exactly like the Tkinter PLAY button (same env/cwd)
-  play_status {log}    -> is the started process still running / exit code / output tail
+Commands (M1.2):
+  state                       -> everything the UI needs: settings, ini, choices (all real
+                                  option lists), game status, music, mods, patches (built-in
+                                  and external), backups, controls, presets, fsr4, version
+  set_ini {values} / set_app {values}
+  set_game_patches {names[]}            (settings.json game_patches[title_id])
+  set_external_patches {enabled[], disabled[]}
+  mods_set {order[], disabled[]}        (mods.json)
+  preset_save {name} / preset_load {name} / preset_delete {name}
+  backups_list / backup_restore {name}  (save_backup; refuses while the game runs)
+  controls_set {key{}, pad{}, pad_style}
+  clear_cache                           (user/cache; refuses while the game runs)
+  update_check                          (latest_release vs VERSION — check only)
+  log_read                              (real run log; sources reported honestly)
+  play / play_status                    (unchanged contract)
 
-No Tkinter window is ever created; no user data is touched beyond the launcher's own
-configuration files, and those only through the same functions the Tkinter launcher uses.
+No Tkinter window is ever created; user data is only touched through the port's own
+functions, and destructive ops (restore/clear) guard on the game not running.
 """
 import json
 import os
@@ -25,10 +35,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # launcher/ on the path
 import gow3_launcher_win as L  # noqa: E402  (the port's launcher, as a library)
+sys.path.insert(0, str(L.PORT_DIR / "scripts"))  # mods/save_backup/patches live here
 
 MUSIC_KEYS = ("ambient_volume", "ambient_muted", "ambient_file")
 RUN_LOG = Path(tempfile.gettempdir()) / "gow3-cinematic-run.log"
 RUN_PID = Path(tempfile.gettempdir()) / "gow3-cinematic-run.pid"
+
+
+def _out(values):
+    sys.stdout.flush()
+    return values
 
 
 def choice_labels(pairs):
@@ -39,8 +55,42 @@ def app_settings() -> dict:
     return {**L.APP_DEFAULTS, **L.load_json(L.CONFIG_FILE, {})}
 
 
+def game_running() -> bool:
+    try:
+        pid = int(RUN_PID.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return False
+    return pid_alive(pid)
+
+
+def pid_alive(pid: int) -> bool:
+    """Read-only liveness check (OpenProcess QUERY + GetExitCodeProcess): never signals."""
+    if pid <= 0:
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        try:
+            code = wintypes.DWORD()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return False
+            return code.value == 259  # STILL_ACTIVE (ambiguity documented)
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:
+        return False
+
+
+def meta_dir(app: dict) -> Path:
+    return L.meta_folder(app.get("game_dir") or ".", app.get("update_dir") or "")
+
+
 def game_state(app: dict, ini: dict) -> dict:
-    folder = L.meta_folder(app.get("game_dir") or ".", app.get("update_dir") or "")
+    folder = meta_dir(app)
     info = L.game_info(folder) if folder else None
     title_id, profile = L.game_profile_of(folder)
     names = app.get("game_patches", {}).get(title_id) or []
@@ -54,46 +104,144 @@ def game_state(app: dict, ini: dict) -> dict:
     missing = []
     try:
         if info:
-            missing = [m[0] if isinstance(m, tuple) else str(m)
+            missing = [str(m[0] if isinstance(m, tuple) else m)
                        for m in (L.missing_game_files(folder) or [])][:8]
     except Exception:
         missing = []
-    return {
-        "found": bool(info),
-        "folder": folder,
-        "title_id": title_id,
-        "patch_profile": bool(profile),
-        "summary": summary,
-        "missing_files": missing,
-    }
+    return {"found": bool(info), "folder": str(folder), "title_id": title_id,
+            "patch_profile": bool(profile), "summary": summary, "missing_files": missing}
 
 
 def music_state(app: dict) -> dict:
     art = L.DATA_DIR / "launcher" / "cinematic" / "public" / "art"
     default = next((str(p) for name in ("ambient.mp3", "intro_launcher.mp3")
                     for p in [art / name] if p.is_file()), None)
-    return {
-        "default_path": default,
-        "file": app.get("ambient_file") or "",
-        "volume": float(app.get("ambient_volume", 0.55)),
-        "muted": bool(app.get("ambient_muted", False)),
+    return {"default_path": default, "file": app.get("ambient_file") or "",
+            "volume": float(app.get("ambient_volume", 0.55)),
+            "muted": bool(app.get("ambient_muted", False))}
+
+
+def all_choices(app: dict) -> dict:
+    gpus = L.list_gpus()
+    c = {
+        "display_mode": choice_labels(L.DISPLAY_MODES),
+        "render_resolution": choice_labels(L.RESOLUTION_CHOICES),
+        "engine_fps": choice_labels(L.ENGINE_FPS_CHOICES),
+        "fps_limit": choice_labels(L.FPS_LIMITS),
+        "upscaler": choice_labels(L.UPSCALERS),
+        "preset": choice_labels(L.PRESETS),
+        "output_res": choice_labels(L.OUTPUTS),
+        "live_resolution": choice_labels(L.LIVE),
+        "frames_queued": choice_labels(L.FRAMES_QUEUED),
+        "stream_memory": choice_labels(L.STREAM_MEMORY),
+        "draw_pipe": choice_labels(L.DRAW_PIPE),
+        "readbacks": choice_labels(L.READBACKS),
+        "language": choice_labels(L.LANGUAGES),
+        "ui_language": choice_labels(L.UI_LANGUAGES),
+        "video_backend": choice_labels(L.VIDEO_BACKENDS),
+        "gpu_id": [{"value": "", "label": "Automático"}] + [
+            {"value": row[0], "label": row[1]} for row in gpus],
+        "no_msaa": choice_labels(L.no_msaa_options(gpus, app.get("gpu_id", ""))),
     }
+    return c
+
+
+def patches_state(app: dict) -> dict:
+    import xml.etree.ElementTree as ET
+    from patches import EXCLUSIVE_PREFIX
+    folder = meta_dir(app)
+    title_id, profile = L.game_profile_of(folder)
+    builtin = []
+    if profile:
+        _ids, xml, version = profile[:3]
+        metas = [m for m in ET.parse(xml).getroot().iter("Metadata") if m.get("AppVer") == version]
+        chosen = app.get("game_patches", {}).get(title_id)
+        on = set(chosen) if chosen is not None else {m.get("Name") for m in metas
+                                                     if m.get("isEnabled", "false").lower() == "true"}
+        for meta in metas:
+            name = meta.get("Name")
+            if name.startswith(EXCLUSIVE_PREFIX) or name.startswith("Frame Rate Patch"):
+                continue
+            builtin.append({"name": name, "author": meta.get("Author"),
+                            "note": meta.get("Note"), "enabled": name in on})
+    from patches import external_patches
+    ext = []
+    if profile:
+        root = Path(app.get("patches_dir") or L.DATA_DIR / "patches")
+        chosen = L.load_json(L.DATA_DIR / "patches.json", {})
+        for key, _path, meta in external_patches(root, profile[2], profile[1], profile[0]):
+            on = key in chosen.get("enabled", []) or (key not in chosen.get("disabled", [])
+                                                      and meta.get("isEnabled", "false").lower() == "true")
+            ext.append({"key": key, "author": meta.get("Author"), "enabled": on})
+    return {"title_id": title_id, "version": (profile[2] if profile else None),
+            "builtin": builtin, "external": ext}
+
+
+def mods_state(app: dict) -> dict:
+    from mods import discover, conflicts
+    root = Path(app.get("mods_dir") or L.DATA_DIR / "mods")
+    available = discover(root)
+    saved = L.load_json(L.DATA_DIR / "mods.json", {})
+    order = [n for n in saved.get("order", []) if n in available] + \
+            [n for n in available if n not in saved.get("order", [])]
+    disabled = [n for n in saved.get("disabled", []) if n in available]
+    enabled_now = [n for n in order if n not in disabled]
+    return {"available": available, "order": order, "disabled": disabled,
+            "conflicts": conflicts(root, enabled_now),
+            "presets": sorted(L.load_json(L.MOD_PRESETS, {}))}
+
+
+def backups_state(app: dict) -> dict:
+    import save_backup
+    user = Path(app.get("user_dir") or L.DATA_DIR / "user")
+    return {"keep": save_backup.KEEP, "names": save_backup.list_backups(user)}
+
+
+def controls_state(app: dict) -> dict:
+    saved = {kind: L.control_values(app.get("controls"), kind) for kind in ("key", "pad")}
+    style = app.get("pad_style") if app.get("pad_style") in L.PAD_STYLES else "playstation"
+    rows = []
+    for button, key, pad in L.CONTROLS:
+        rows.append({"button": button, "ps_name": L.PS_BUTTON_NAMES[button],
+                     "default_key": key, "default_pad": pad or "",
+                     "key": saved.get("key", {}).get(button) or key,
+                     "pad": saved.get("pad", {}).get(button) or pad or "",
+                     "remappable": bool(pad)})
+    return {"style": style, "styles": {s: dict(v) for s, v in L.PAD_STYLES.items()},
+            "rows": rows}
+
+
+def fsr4_state() -> dict:
+    total, missing = len(L.fsr4_files()), len(L.fsr4_missing())
+    return {"installed": total - missing, "total": total, "missing": missing,
+            "folder": str(L.fsr4_folder())}
 
 
 def cmd_state() -> dict:
-    app, (ini, _lines) = app_settings(), L.load_ini()
+    app = app_settings()
+    ini, _lines = L.load_ini()
     return {
+        "version": L.VERSION,
         "app": {k: app[k] for k in sorted(app) if isinstance(app[k], (str, int, float, bool))},
+        "controls_cfg": {"controls": app.get("controls", {}), "pad_style": app.get("pad_style", "playstation")},
+        "game_patches_cfg": app.get("game_patches", {}),
         "ini": dict(sorted(ini.items())),
         "game": game_state(app, ini),
         "music": music_state(app),
-        "choices": {
-            "display_mode": choice_labels(L.DISPLAY_MODES),
-            "render_resolution": choice_labels(L.RESOLUTION_CHOICES),
-            "engine_fps": choice_labels(L.ENGINE_FPS_CHOICES),
-            "fps_limit": choice_labels(L.FPS_LIMITS),
-        },
+        "choices": all_choices(app),
+        "patches": patches_state(app),
+        "mods": mods_state(app),
+        "backups": backups_state(app),
+        "controls": controls_state(app),
+        "fsr4": fsr4_state(),
+        "running": game_running(),
     }
+
+
+def save_app(app: dict) -> None:
+    """Writes settings.json in the launcher's own format (dir ensured)."""
+    L.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    L.CONFIG_FILE.write_text(json.dumps(app, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def cmd_set_ini(values: dict) -> dict:
@@ -118,22 +266,133 @@ def cmd_set_app(values: dict) -> dict:
             app[key] = value
         else:
             return {"error": f"settings.json key not part of the launcher contract: {key}"}
-    L.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    L.CONFIG_FILE.write_text(json.dumps(app, indent=2, ensure_ascii=False), encoding="utf-8")
+    save_app(app)
     return {"ok": True}
+
+
+def cmd_set_game_patches(names: list) -> dict:
+    app = app_settings()
+    title_id, profile = L.game_profile_of(meta_dir(app))
+    if not title_id:
+        return {"error": "Pasta do jogo não configurada."}
+    app.setdefault("game_patches", {})[title_id] = [str(n) for n in names]
+    save_app(app)
+    return {"ok": True}
+
+
+def cmd_set_external_patches(enabled: list, disabled: list) -> dict:
+    chosen = L.load_json(L.DATA_DIR / "patches.json", {})
+    chosen["enabled"] = sorted(str(k) for k in enabled)
+    chosen["disabled"] = sorted(str(k) for k in disabled)
+    (L.DATA_DIR / "patches.json").write_text(json.dumps(chosen, indent=2), encoding="utf-8")
+    return {"ok": True}
+
+
+def cmd_mods_set(order: list, disabled: list) -> dict:
+    (L.DATA_DIR / "mods.json").write_text(json.dumps(
+        {"order": [str(n) for n in order], "disabled": [str(n) for n in disabled]}, indent=2),
+        encoding="utf-8")
+    return {"ok": True}
+
+
+def cmd_preset(name: str, op: str) -> dict:
+    name = str(name).strip()
+    presets = L.load_json(L.MOD_PRESETS, {})
+    if op == "save":
+        if not name:
+            return {"error": "Dê um nome ao preset."}
+        saved = L.load_json(L.DATA_DIR / "mods.json", {})
+        presets[name] = saved
+        L.MOD_PRESETS.write_text(json.dumps(presets, indent=2), encoding="utf-8")
+        return {"ok": True, "presets": sorted(presets)}
+    if op == "delete":
+        presets.pop(name, None)
+        L.MOD_PRESETS.write_text(json.dumps(presets, indent=2), encoding="utf-8")
+        return {"ok": True, "presets": sorted(presets)}
+    if op == "load":
+        from mods import apply_preset
+        preset = presets.get(name)
+        if not isinstance(preset, dict):
+            return {"error": "Preset não encontrado."}
+        app = app_settings()
+        from mods import discover
+        available = discover(Path(app.get("mods_dir") or L.DATA_DIR / "mods"))
+        order, disabled = apply_preset(preset, list(available))
+        return cmd_mods_set(order, disabled)
+    return {"error": f"unknown preset op: {op}"}
+
+
+def cmd_backup_restore(name: str) -> dict:
+    import save_backup
+    if game_running():
+        return {"error": "Feche o jogo antes de restaurar saves."}
+    name = str(name)
+    app = app_settings()
+    user = Path(app.get("user_dir") or L.DATA_DIR / "user")
+    names = save_backup.list_backups(user)
+    if name not in names:
+        return {"error": "Backup não encontrado."}
+    try:
+        safety = save_backup.restore(user, name)
+    except (OSError, ValueError) as error:
+        return {"error": f"Não foi possível restaurar: {error}"}
+    return {"ok": True, "safety": safety.name if safety else None,
+            "names": save_backup.list_backups(user)}
+
+
+def cmd_controls_set(key: dict, pad: dict, pad_style: str) -> dict:
+    app = app_settings()
+    if pad_style not in L.PAD_STYLES:
+        return {"error": "pad_style inválido"}
+    app["pad_style"] = pad_style
+    controls = {"key": {}, "pad": {}}
+    for kind, values in (("key", key), ("pad", pad)):
+        if isinstance(values, dict):
+            controls[kind] = {str(b): str(v) for b, v in values.items() if str(v).strip()}
+    app["controls"] = controls
+    save_app(app)
+    return {"ok": True}
+
+
+def cmd_clear_cache() -> dict:
+    import shutil
+    if game_running():
+        return {"error": "Feche o jogo antes de limpar o cache."}
+    app = app_settings()
+    cache = Path(app.get("user_dir") or L.DATA_DIR / "user") / "cache"
+    shutil.rmtree(cache, ignore_errors=True)
+    return {"ok": True}
+
+
+def cmd_update_check() -> dict:
+    try:
+        version, url, page = L.latest_release()
+    except (OSError, ValueError, KeyError) as error:
+        return {"error": f"Não foi possível verificar atualizações: {error}"}
+    newer = L.version_tuple(version) > L.version_tuple(L.VERSION)
+    return {"current": L.VERSION, "latest": version, "url": url, "page": page, "newer": newer}
+
+
+def cmd_log_read() -> dict:
+    sources = []
+    for label, path in (("execução", RUN_LOG),):
+        try:
+            text = Path(path).read_text(encoding="utf-8", errors="replace")
+            sources.append({"name": label, "path": str(path), "text": text[-12000:]})
+        except OSError:
+            pass
+    return {"sources": sources, "running": game_running()}
 
 
 def cmd_play() -> dict:
     app = app_settings()
-    if not L.game_info(L.meta_folder(app.get("game_dir") or ".", app.get("update_dir") or "")):
+    if not L.game_info(meta_dir(app)):
         return {"error": "Pasta do jogo não configurada ou sem eboot.bin válido."}
     try:
         log = open(RUN_LOG, "w", encoding="utf-8", errors="replace")
     except OSError as error:
         return {"error": f"Não foi possível abrir o log de execução: {error}"}
     try:
-        # Detached: the game outlives this bridge process exactly as it outlives the
-        # Tkinter launcher (which also never keeps run.py in a Windows Job Object).
         process = subprocess.Popen(L.run_command(), cwd=str(L.PORT_DIR),
                                    env=L.game_environment(app), stdin=subprocess.DEVNULL,
                                    stdout=log, stderr=subprocess.STDOUT,
@@ -142,41 +401,12 @@ def cmd_play() -> dict:
     except OSError as error:
         log.close()
         return {"error": f"Não foi possível iniciar: {error}"}
-    log.close()  # the child holds its own inherited handle
+    log.close()
     RUN_PID.write_text(str(process.pid), encoding="utf-8")
     return {"ok": True, "pid": process.pid, "log": str(RUN_LOG)}
 
 
-def pid_alive(pid: int) -> bool:
-    """Read-only liveness check on Windows: OpenProcess with QUERY access only and
-    GetExitCodeProcess. Never signals, never terminates — os.kill(pid, 0) on Windows
-    routes through the same API family but is documented for CTRL_* signals and
-    TerminateProcess semantics, so it is avoided on purpose."""
-    if pid <= 0:
-        return False
-    try:
-        import ctypes
-        from ctypes import wintypes
-        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-        STILL_ACTIVE = 259
-        kernel32 = ctypes.windll.kernel32
-        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-        if not handle:
-            return False
-        try:
-            code = wintypes.DWORD()
-            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
-                return False
-            return code.value == STILL_ACTIVE  # 259: the ambiguity window is documented
-        finally:
-            kernel32.CloseHandle(handle)
-    except Exception:
-        return False
-
-
 def cmd_play_status() -> dict:
-    """Cross-process liveness (the play came from a previous, already-exited bridge run):
-    the PID file plus the run log; a finished run is classified by its log's tail."""
     try:
         pid = int(RUN_PID.read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
@@ -198,10 +428,15 @@ def cmd_play_status() -> dict:
 
 
 def main() -> int:
+    # UTF-8 de ponta a ponta: o processo roda com pipes; sem isto o Windows usa cp1252 e
+    # caracteres como '·', 'ã', 'ç' viram bytes inválidos que o Rust converte em U+FFFD.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     try:
         request = json.loads(sys.stdin.read() or "{}")
     except ValueError:
-        print(json.dumps({"error": "invalid JSON request"}))
+        print(json.dumps({"error": "invalid JSON request"}, ensure_ascii=False))
         return 2
     cmd = request.get("cmd")
     try:
@@ -211,13 +446,35 @@ def main() -> int:
             response = cmd_set_ini(request.get("values") or {})
         elif cmd == "set_app":
             response = cmd_set_app(request.get("values") or {})
+        elif cmd == "set_game_patches":
+            response = cmd_set_game_patches(request.get("names") or [])
+        elif cmd == "set_external_patches":
+            response = cmd_set_external_patches(request.get("enabled") or [],
+                                                request.get("disabled") or [])
+        elif cmd == "mods_set":
+            response = cmd_mods_set(request.get("order") or [], request.get("disabled") or [])
+        elif cmd == "preset":
+            response = cmd_preset(request.get("name", ""), request.get("op", ""))
+        elif cmd == "backups_list":
+            response = {"names": backups_state(app_settings())["names"]}
+        elif cmd == "backup_restore":
+            response = cmd_backup_restore(request.get("name", ""))
+        elif cmd == "controls_set":
+            response = cmd_controls_set(request.get("key") or {}, request.get("pad") or {},
+                                        request.get("pad_style", "playstation"))
+        elif cmd == "clear_cache":
+            response = cmd_clear_cache()
+        elif cmd == "update_check":
+            response = cmd_update_check()
+        elif cmd == "log_read":
+            response = cmd_log_read()
         elif cmd == "play":
             response = cmd_play()
         elif cmd == "play_status":
             response = cmd_play_status()
         else:
             response = {"error": f"unknown command: {cmd!r}"}
-    except Exception as error:  # fail loud to the caller, never half-written state
+    except Exception as error:  # fail loud, never half-written state
         response = {"error": f"{type(error).__name__}: {error}"}
     print(json.dumps(response, ensure_ascii=False))
     return 2 if "error" in response else 0

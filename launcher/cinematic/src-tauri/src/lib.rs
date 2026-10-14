@@ -31,6 +31,7 @@ fn bridge_path() -> Result<PathBuf, String> {
 }
 
 /// One JSON request in, one JSON response out — every port rule stays in Python.
+/// The child runs with UTF-8 pipes (PYTHONIOENCODING) so '·', 'ã', 'ç' survive the trip.
 #[tauri::command]
 fn bridge_call(request: String) -> Result<String, String> {
     let bridge = bridge_path()?;
@@ -42,6 +43,8 @@ fn bridge_call(request: String) -> Result<String, String> {
     let mut child = Command::new("python")
         .arg(&bridge)
         .current_dir(port_dir)
+        .env("PYTHONIOENCODING", "utf-8")
+        .env("PYTHONUTF8", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -65,25 +68,28 @@ fn bridge_call(request: String) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// The maintainer picks the ambient track; the file stays local (never bundled).
-/// Async command: runs off the main thread while the dialog lives on it.
+/// The maintainer picks a FOLDER (game/update/mods/patches/saves) with the native dialog.
 #[tauri::command]
-async fn pick_music_file(app: tauri::AppHandle) -> Option<String> {
+async fn pick_folder(app: tauri::AppHandle) -> Option<String> {
     use tauri_plugin_dialog::DialogExt;
     let (sender, receiver) = std::sync::mpsc::channel::<Option<String>>();
-    app.dialog()
-        .file()
-        .add_filter("MP3", &["mp3"])
-        .pick_file(move |file| {
-            let picked = file
-                .and_then(|path| path.into_path().ok())
-                .map(|path| path.to_string_lossy().into_owned());
-            let _ = sender.send(picked);
-        });
-    receiver.recv().ok().flatten()
+    let picked = app.dialog().file().blocking_pick_folder();
+    picked
+        .and_then(|path| path.into_path().ok())
+        .map(|p| p.to_string_lossy().into_owned())
 }
 
-/// Reads the chosen MP3 as a data URL (bounded) so <audio> can play a local file
+/// Opens a path in Windows Explorer (the port folder, gow3.ini, mods…).
+#[tauri::command]
+fn open_in_explorer(path: String) -> Result<(), String> {
+    Command::new("explorer")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| format!("explorer: {e}"))?;
+    Ok(())
+}
+
+/// Reads the ambient MP3 as a data URL (bounded) so <audio> plays a local file
 /// without granting the webview any filesystem scope.
 #[tauri::command]
 fn music_data_url(path: String) -> Result<Option<String>, String> {
@@ -105,7 +111,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             bridge_call,
-            pick_music_file,
+            pick_folder,
+            open_in_explorer,
             music_data_url
         ])
         .run(tauri::generate_context!())

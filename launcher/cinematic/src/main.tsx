@@ -11,9 +11,10 @@ function mockBridge() {
     display_mode: "borderless", render_resolution: "native", engine_fps: "240", fps_limit: "0",
   }
   const state = {
-    app: {}, ini,
+    version: "2.1.8", app: {}, controls_cfg: { controls: {}, pad_style: "playstation" },
+    game_patches_cfg: {}, ini,
     game: { found: true, folder: "F:\\GOW3\\…", title_id: "CUSA01623", patch_profile: true,
-            summary: "Native (1080p) · 240 FPS engine · 2 patches", missing_files: [] },
+            summary: "Native (1080p) · 120 FPS engine · 2 patches", missing_files: [] },
     music: { default_path: null, file: "", volume: 0.55, muted: false },
     choices: {
       display_mode: [{ value: "windowed", label: "Windowed" }, { value: "borderless", label: "Borderless" }, { value: "fullscreen", label: "Fullscreen" }],
@@ -21,6 +22,13 @@ function mockBridge() {
       engine_fps: [{ value: "60", label: "60 (original)" }, { value: "120", label: "120" }, { value: "240", label: "240" }],
       fps_limit: [{ value: "60", label: "60" }, { value: "120", label: "120" }, { value: "0", label: "Unlimited" }],
     },
+    patches: { title_id: "CUSA01623", version: "01.02",
+      builtin: [{ name: "60 FPS", author: null, note: null, enabled: true }], external: [] },
+    mods: { available: ["Exemplo"], order: ["Exemplo"], disabled: [], conflicts: [], presets: [] },
+    backups: { keep: 10, names: [] },
+    controls: { style: "playstation", styles: { playstation: { a: "Cruz" } }, rows: [] },
+    fsr4: { installed: 44, total: 44, missing: 0, folder: "fsr4_shaders" },
+    running: false,
   }
   window.__GOW3_BRIDGE__ = async (request: string) => {
     const parsed = JSON.parse(request) as { cmd: string; values?: Record<string, string> }
@@ -37,7 +45,8 @@ async function boot() {
   if ((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) {
     const { invoke } = await import("@tauri-apps/api/core")
     window.__GOW3_BRIDGE__ = (request: string) => invoke<string>("bridge_call", { request })
-    window.__GOW3_PICK_MUSIC__ = () => invoke<string | null>("pick_music_file")
+    window.__GOW3_PICK_FOLDER__ = () => invoke<string | null>("pick_folder")
+    window.__GOW3_OPEN__ = (path: string) => invoke<void>("open_in_explorer", { path })
     window.__GOW3_MUSIC_URL__ = (path: string) => invoke<string | null>("music_data_url", { path })
   } else {
     mockBridge()

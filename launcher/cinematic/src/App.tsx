@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { bridge, BridgeState } from "./bridge"
+import { PAGES } from "./components/pages"
 import { NavMenu } from "./components/NavMenu"
 import { PlayButton, PlayPhase } from "./components/PlayButton"
 import { StatusBar } from "./components/StatusBar"
-import { DisplayPage } from "./components/DisplayPage"
 import { MusicPlayer } from "./components/MusicPlayer"
 import { TitleBar } from "./components/TitleBar"
 
-export type Page = "home" | "display" | "performance" | "game" | "patches"
-  | "mods" | "controls" | "advanced" | "log"
+export type Page = "home" | (typeof PAGES)[number]["id"]
 
 export default function App() {
   const [state, setState] = useState<BridgeState | null>(null)
@@ -19,10 +18,7 @@ export default function App() {
   const startedAt = useRef(0)
 
   const refresh = useCallback(() => {
-    bridge.state().then(setState).catch((e) => {
-      setBridgeError(String(e.message ?? e))
-      document.title = `ERR ${String(e.message ?? e).slice(0, 80)}`
-    })
+    bridge.state().then(setState).catch((e) => setBridgeError(String(e.message ?? e)))
   }, [])
 
   useEffect(() => { refresh() }, [refresh])
@@ -37,7 +33,7 @@ export default function App() {
           setPhase(Date.now() - startedAt.current > 6000 ? "running" : "preparing")
         } else if (phase === "running" || Date.now() - startedAt.current > 6000) {
           setPhase(status.outcome === "error" ? "error" : "idle")
-          if (status.outcome === "error") setPlayError("run.py terminou com erro — ver Log")
+          if (status.outcome === "error") setPlayError("run.py terminou com erro — ver Registro")
           refresh()
         }
       } catch { /* bridge hiccup: keep polling */ }
@@ -59,6 +55,7 @@ export default function App() {
     }
   }
 
+
   return (
     <div className="app">
       <div className="art">
@@ -77,29 +74,32 @@ export default function App() {
           }} />
       </div>
       <NavMenu page={page} onNavigate={setPage} />
-      {(state || bridgeError) && (
+      {state && (
         <>
           <StatusBar
-            summary={state?.game.summary ?? ""}
-            missing={state?.game.missing_files ?? []}
+            summary={state.game.summary}
+            missing={state.game.missing_files}
             bridgeError={bridgeError}
           />
-          {state && (
-            <>
-              <MusicPlayer state={state.music} onChange={refresh} />
-              <PlayButton
-                phase={phase}
-                available={state.game.found}
-                error={playError}
-                onPlay={onPlay}
-              />
-            </>
-          )}
+          <MusicPlayer state={state.music} onChange={refresh} />
+          <PlayButton
+            phase={phase}
+            available={state.game.found}
+            error={playError}
+            onPlay={onPlay}
+          />
         </>
       )}
-      {page === "display" && state && (
-        <DisplayPage ini={state.ini} choices={state.choices} onChanged={refresh} />
-      )}
+      {(() => {
+        const active = PAGES.find((p) => p.id === page)
+        if (!active || !state) return null
+        const Page = active.component
+        return (
+          <div className="page-host">
+            <Page state={state} refresh={refresh} />
+          </div>
+        )
+      })()}
     </div>
   )
 }
