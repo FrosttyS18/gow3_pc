@@ -221,12 +221,13 @@ export function GamePage({ state, refresh }: P) {
   const app = state.app
   const setIni = (k: string, v: boolean) => run(() => bridge.setIni({ [k]: v }))
   const restore = () => run(async () => {
-    if (!backup) return
+    const selected = backup || state.backups.names[0] || ''
+    if (!selected) return
     if (!window.confirm(`Substituir os saves atuais pelo backup ${backup}? Os saves atuais são copiados antes.`)) return
     setBusy(true)
     try {
-      const r = await bridge.backupRestore(backup)
-      setBackupMsg(`Saves restaurados de ${backup}.` + (r.safety ? ` Saves anteriores: ${r.safety}.` : ""))
+      const r = await bridge.backupRestore(selected)
+      setBackupMsg(`Saves restaurados de ${selected}.` + (r.safety ? ` Saves anteriores: ${r.safety}.` : ""))
     } finally { setBusy(false) }
   })
   return (
@@ -488,8 +489,8 @@ export function AdvancedPage({ state, refresh }: P) {
       </Section>
       <Section title={t("Log")}>
         <div className="inline-row">
-          <ActionButton onClick={() => bridge.openInExplorer(String(state.app.user_dir || ""))}>Pasta de saves</ActionButton>
-          <ActionButton onClick={() => bridge.openInExplorer("gow3.ini")}>gow3.ini</ActionButton>
+          <ActionButton onClick={() => bridge.openInExplorer(String(state.app.user_dir || "C:/gow3/wt-m1/user"))}>Pasta de saves</ActionButton>
+          <ActionButton onClick={() => bridge.openInExplorer("C:/gow3/wt-m1/gow3.ini")}>gow3.ini</ActionButton>
         </div>
         <div className="inline-row">
           <ActionButton danger onClick={clearCache}>Limpar cache de shaders</ActionButton>

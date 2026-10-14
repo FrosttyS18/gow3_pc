@@ -169,26 +169,9 @@ def all_choices(app: dict) -> dict:
 
 
 def _resolve_patches_dir(app: dict) -> Path:
-    """Pasta de patches: a configuração explícita vence; vazio = a pasta do PORT_DIR
-    (como o Tkinter). Se o PORT_DIR/patches só tem o XML interno (worktree dev),
-    procura também no pacote oficial instalado (Downloads), que é de onde o launcher
-    Tkinter do mantenedor resolve os patches de terceiros na prática."""
-    explicit = app.get("patches_dir")
-    if explicit:
-        return Path(explicit)
-    local = L.DATA_DIR / "patches"
-    if any(p.suffix == ".xml" and "God_of_War" not in p.name for p in local.glob("*.xml")):
-        return local  # tem XML de terceiro: usa a própria pasta
-    # procura o pacote ( Downloads/gow3-windows*/gow3-windows/patches )
-    for downloads in [L.Path.home() / "Downloads", L.Path(os.environ.get("USERPROFILE", "")) / "Downloads"]:
-        if not downloads.is_dir():
-            continue
-        for pkg in downloads.glob("gow3-windows*"):
-            for nested in (pkg, pkg / "gow3-windows"):
-                patches = nested / "patches"
-                if patches.is_dir() and any(p.suffix == ".xml" for p in patches.glob("*.xml")):
-                    return patches
-    return local
+    """A MESMA resolução de game_environment(): o diretório exibido é o diretório
+    que o runtime usa como GOW3_PATCHES_DIR — sem fallback que crie divergência."""
+    return Path(app.get("patches_dir") or "") if app.get("patches_dir") else L.DATA_DIR / "patches"
 
 
 def patches_state(app: dict) -> dict:
@@ -345,9 +328,16 @@ def cmd_set_game_patches(names: list) -> dict:
 
 
 def cmd_set_external_patches(enabled: list, disabled: list) -> dict:
+    """Atualiza SÓ as chaves visíveis na versão atual do jogo, preservando as
+    seleções de outras versões/arquivos (mesma semântica do Tkinter collect())."""
     chosen = L.load_json(L.DATA_DIR / "patches.json", {})
-    chosen["enabled"] = sorted(str(k) for k in enabled)
-    chosen["disabled"] = sorted(str(k) for k in disabled)
+    visible = set(str(k) for k in enabled) | set(str(k) for k in disabled)
+    old_enabled = set(chosen.get("enabled", []))
+    old_disabled = set(chosen.get("disabled", []))
+    chosen["enabled"] = sorted((set(str(k) for k in enabled) | (old_enabled - visible))
+                               & (old_enabled | set(str(k) for k in enabled)))
+    chosen["disabled"] = sorted((set(str(k) for k in disabled) | (old_disabled - visible))
+                                & (old_disabled | set(str(k) for k in disabled)))
     (L.DATA_DIR / "patches.json").write_text(json.dumps(chosen, indent=2), encoding="utf-8")
     return {"ok": True}
 
@@ -405,14 +395,24 @@ def cmd_backup_restore(name: str) -> dict:
 
 
 def cmd_controls_set(key: dict, pad: dict, pad_style: str) -> dict:
+    """Persiste SÓ os mapeamentos que diferem do padrão (mesma semântica do
+    Tkinter control_changes()) — valores padrão não viram overrides permanentes."""
     app = app_settings()
     if pad_style not in L.PAD_STYLES:
         return {"error": "pad_style inválido"}
     app["pad_style"] = pad_style
     controls = {"key": {}, "pad": {}}
+    defaults = {b: (k, p) for b, k, p in L.CONTROLS}
     for kind, values in (("key", key), ("pad", pad)):
         if isinstance(values, dict):
-            controls[kind] = {str(b): str(v) for b, v in values.items() if str(v).strip()}
+            for button, value in values.items():
+                value = str(value).strip()
+                if not value:
+                    continue
+                default = defaults.get(str(button), ("", ""))
+                default_value = default[0] if kind == "key" else default[1]
+                if value != default_value:  # só grava o que difere do padrão
+                    controls[kind][str(button)] = value
     app["controls"] = controls
     save_app(app)
     return {"ok": True}

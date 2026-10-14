@@ -29,6 +29,12 @@ export default function App() {
   }, [])
 
   useEffect(() => { refresh() }, [refresh])
+  useEffect(() => {
+    if (!state?.app.check_updates) return
+    bridge.updateCheck().then((r) => {
+      if (r.newer) setBridgeError('Versao ' + r.latest + ' disponivel')
+    }).catch(() => {})
+  }, [state?.app.check_updates]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (state) setMusicMuted(state.music.muted) }, [state?.music.muted]) // eslint-disable-line react-hooks/exhaustive-deps
   useAmbientMusic(state?.music, musicMuted, phase)
 
