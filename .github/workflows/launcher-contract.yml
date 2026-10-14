@@ -1,15 +1,12 @@
 name: launcher-contract
 
-# CAMADA A: testes de contrato do launcher em Chromium headless (CI executável).
-# CAMADA B: testes Tauri/WebView2 real (test_ui.py) — executados localmente em
-# Windows compatível; NÃO substituídos por mocks.
+# Testes FUNDAMENTAIS de interface (não visuais) — o mantenedor avalia
+# aparência, hover, fontes, cores e animações manualmente.
+# Este check valida: abertura de páginas, ausência de crashes/exceções React,
+# rotas distintas (Patches≠Mods), Música como ação.
 #
-# Este check NÃO usa filtro `paths` — um check destinado a ser obrigatório
-# precisa emitir resultado em TODOS os PRs, mesmo quando o frontend não muda,
-# para evitar estados pendentes que bloqueiam merges.
-#
-# Token somente leitura; sem segredos; sem pull_request_target; sem execução
-# de código do PR em contexto privilegiado.
+# Sem filtro `paths` — check obrigatório emite em TODOS os PRs.
+# Token somente leitura; sem segredos; sem pull_request_target.
 
 on:
   pull_request:
@@ -22,7 +19,7 @@ jobs:
   contract:
     name: launcher contract tests
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -30,19 +27,18 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Install dependencies
+        working-directory: launcher/cinematic
+        run: npm install
+
       - name: Install Playwright Chromium
+        working-directory: launcher/cinematic
         run: npx playwright install chromium --with-deps
 
-      - name: Run contract tests (Layer A — headless)
+      - name: Build frontend (TypeScript check)
         working-directory: launcher/cinematic
-        run: |
-          npm install
-          npx playwright test tests/test_contract.mjs --reporter=line
-        env:
-          CI: 'true'
+        run: npm run build
 
-      - name: Report Layer B status (informational)
-        run: |
-          echo "Layer B (Tauri/WebView2 real) tests: run locally on Windows"
-          echo "  python launcher/cinematic/tests/test_ui.py"
-          echo "These tests are NOT replaced by mocks; they validate native integration."
+      - name: Run contract tests
+        working-directory: launcher/cinematic
+        run: npx playwright test
