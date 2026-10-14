@@ -15,9 +15,9 @@
       {
         "title": "God of War III Remastered",
         "width": 1280,
-        "height": 760,
-        "minWidth": 1100,
-        "minHeight": 660,
+        "height": 720,
+        "minWidth": 1280,
+        "minHeight": 720,
         "center": true,
         "resizable": true,
         "decorations": false,
