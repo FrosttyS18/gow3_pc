@@ -23,20 +23,39 @@ export default function App() {
 
   useEffect(() => { refresh() }, [refresh])
 
-  // poll the started run.py: preparing (first instants) -> running -> finished/error
+  // Poll do processo: preparing -> running -> finished/error pelo CÓDIGO DE SAÍDA REAL
+  // gravado pelo monitor (não por palavras no log). Falhas de polling repetidas
+  // aparecem para o usuário em vez de morrerem no console.
   useEffect(() => {
     if (phase !== "preparing" && phase !== "running") return
+    let failures = 0
     const timer = setInterval(async () => {
       try {
         const status = await bridge.playStatus()
+        failures = 0
+        setBridgeError("")
         if (status.running) {
           setPhase(Date.now() - startedAt.current > 6000 ? "running" : "preparing")
-        } else if (phase === "running" || Date.now() - startedAt.current > 6000) {
-          setPhase(status.outcome === "error" ? "error" : "idle")
-          if (status.outcome === "error") setPlayError("run.py terminou com erro — ver Registro")
+        } else if (status.outcome === "unknown" && Date.now() - startedAt.current < 8000) {
+          return  // monitor ainda escrevendo o pid
+        } else {
+          if (status.outcome === "error") {
+            setPhase("error")
+            setPlayError((status.last_line || "o jogo terminou com erro")
+              + (status.exit_code !== null ? ` (código ${status.exit_code})` : "")
+              + " — detalhes no Registro")
+            window.dispatchEvent(new CustomEvent("gow3:restore-music"))
+          } else {
+            setPhase("idle")
+          }
           refresh()
         }
-      } catch { /* bridge hiccup: keep polling */ }
+      } catch (e) {
+        failures += 1
+        if (failures >= 3) {
+          setBridgeError("Falha ao acompanhar o jogo: " + String((e as Error).message ?? e))
+        }
+      }
     }, 1500)
     return () => clearInterval(timer)
   }, [phase, refresh])
@@ -46,9 +65,9 @@ export default function App() {
     setPlayError("")
     setPhase("preparing")
     startedAt.current = Date.now()
-    window.dispatchEvent(new CustomEvent("gow3:fade-music"))
     try {
-      await bridge.play()
+      await bridge.play()  // spawn aceito (validações incluídas): só agora o fade
+      window.dispatchEvent(new CustomEvent("gow3:fade-music"))
     } catch (e) {
       setPhase("error")
       setPlayError(String((e as Error).message ?? e))
@@ -81,7 +100,7 @@ export default function App() {
             missing={state.game.missing_files}
             bridgeError={bridgeError}
           />
-          <MusicPlayer state={state.music} onChange={refresh} />
+          <MusicPlayer state={state.music} />
           <PlayButton
             phase={phase}
             available={state.game.found}

@@ -144,55 +144,41 @@ body { font-family: var(--font); color: var(--text); background: var(--bg); }
   background: linear-gradient(90deg, var(--accent-hi), rgba(164, 22, 26, 0.35) 70%, transparent);
 }
 
-/* ---- música: botão recolhido + volume sob interação (canto sup. esquerdo) ------- */
+/* ---- música: faixa própria do topo (0–38px), acima do painel de vidro -------- */
 .music {
-  position: absolute; left: 24px; top: 40px; z-index: 30;
-  display: flex; align-items: center;
+  position: absolute; left: 24px; top: 5px; z-index: 30;
+  display: flex; align-items: center; height: 28px;
 }
 .music-main {
-  display: inline-flex; align-items: center; gap: 9px;
-  height: 34px; padding: 0 14px;
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 27px; padding: 0 11px;
   background: #000000;
   border: var(--field-border-w) solid var(--figma-red);
-  border-radius: 10px;
+  border-radius: 9px;
   color: #ffffff; cursor: pointer;
-  font-family: var(--font-light); font-size: 13px; font-weight: 300; letter-spacing: 0.02em;
-  transition: box-shadow var(--hover-ms) ease, border-color var(--hover-ms) ease;
+  font-family: var(--font-light); font-size: 12px; font-weight: 300; letter-spacing: 0.02em;
+  transition: box-shadow var(--hover-ms) ease, border-color var(--hover-ms) ease, opacity var(--hover-ms) ease;
 }
 .music-main:hover, .music:focus-within .music-main {
   border-color: var(--accent-hi);
-  box-shadow: 0 0 16px rgba(159, 0, 0, 0.35);
+  box-shadow: 0 0 14px rgba(159, 0, 0, 0.35);
 }
 .music-main:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
-.music[data-has-audio="no"] .music-main { opacity: 0.75; }
+.music.unavailable .music-main { opacity: 0.6; }
+.music-label { line-height: 1; }
 .music-volume {
   display: flex; align-items: center;
   max-width: 0; opacity: 0; overflow: hidden; margin-left: 0;
   transition: max-width var(--hover-ms) var(--hover-ease), opacity var(--hover-ms) ease, margin-left var(--hover-ms) ease;
 }
-.music:hover .music-volume, .music:focus-within .music-volume { max-width: 130px; opacity: 1; margin-left: 10px; }
-
-/* slider estilizado (trilha fina escura, thumb vermelho com aro) */
-input[type="range"].gow3-range, .music-volume input[type="range"], .field input[type="range"] {
-  -webkit-appearance: none; appearance: none;
-  width: 110px; height: 14px; background: transparent; cursor: pointer;
+.music:hover .music-volume, .music:focus-within .music-volume { max-width: 120px; opacity: 1; margin-left: 9px; }
+.music-volume input[type="range"] { width: 100px; }
+.music-notice {
+  position: absolute; top: 32px; left: 0;
+  font-size: 11px; color: #e08080; background: rgba(0, 0, 0, 0.85);
+  border: 1px solid rgba(159, 0, 0, 0.6); border-radius: 4px;
+  padding: 4px 8px; max-width: 340px; white-space: normal;
 }
-input[type="range"]::-webkit-slider-runnable-track {
-  height: 3px; border-radius: 2px;
-  background: linear-gradient(90deg, var(--figma-red), var(--line));
-}
-input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none; appearance: none;
-  width: 11px; height: 11px; border-radius: 50%; margin-top: -4px;
-  background: var(--figma-red); border: 1.5px solid #ffffff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
-}
-input[type="range"]::-moz-range-track { height: 3px; border-radius: 2px; background: var(--line); }
-input[type="range"]::-moz-range-thumb {
-  width: 9px; height: 9px; border-radius: 50%;
-  background: var(--figma-red); border: 1.5px solid #ffffff;
-}
-.field input[type="range"] { width: 180px; }
 
 /* ---- JOGAR ---------------------------------------------------------------------- */
 .play { position: absolute; left: var(--axis); bottom: 32px; transform: translateX(-50%); z-index: 12; }

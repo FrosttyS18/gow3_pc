@@ -72,7 +72,6 @@ fn bridge_call(request: String) -> Result<String, String> {
 #[tauri::command]
 async fn pick_folder(app: tauri::AppHandle) -> Option<String> {
     use tauri_plugin_dialog::DialogExt;
-    let (sender, receiver) = std::sync::mpsc::channel::<Option<String>>();
     let picked = app.dialog().file().blocking_pick_folder();
     picked
         .and_then(|path| path.into_path().ok())

@@ -384,47 +384,145 @@ def cmd_log_read() -> dict:
     return {"sources": sources, "running": game_running()}
 
 
-def cmd_play() -> dict:
-    app = app_settings()
-    if not L.game_info(meta_dir(app)):
-        return {"error": "Pasta do jogo não configurada ou sem eboot.bin válido."}
+def _check_play_prerequisites(app: dict) -> str | None:
+    """As validações que o Tkinter faz antes de iniciar (Launcher.play), com mensagens
+    acionáveis em pt-BR. Retorna None quando pode iniciar."""
+    folder = meta_dir(app)
+    if not L.game_info(folder):
+        return "Pasta do jogo não configurada ou sem eboot.bin válido (configure na página Jogo)."
+    import os as _os
+    if _os.environ.get("GOW3_CINEMATIC_SKIP_GAME_CHECK") == "1":
+        return None  # apenas para testes de integração com processo substituto
     try:
-        log = open(RUN_LOG, "w", encoding="utf-8", errors="replace")
-    except OSError as error:
-        return {"error": f"Não foi possível abrir o log de execução: {error}"}
-    try:
-        process = subprocess.Popen(L.run_command(), cwd=str(L.PORT_DIR),
-                                   env=L.game_environment(app), stdin=subprocess.DEVNULL,
-                                   stdout=log, stderr=subprocess.STDOUT,
-                                   creationflags=getattr(subprocess, "DETACHED_PROCESS", 0)
-                                   | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
-    except OSError as error:
-        log.close()
-        return {"error": f"Não foi possível iniciar: {error}"}
+        source = L.system_files_beside(folder)
+        if source:
+            return (f"Arquivos de sistema de uma extração PKG encontrados em {source}, "
+                    "fora de sce_sys. Copie-os para a pasta sce_sys do jogo "
+                    "(o launcher Tkinter faz esta adoção automaticamente).")
+    except Exception:
+        pass
+    missing = L.missing_game_files(app.get("game_dir") or ".")
+    if missing:
+        listed = '\n'.join(str(m[0] if isinstance(m, tuple) else m) for m in missing[:10])
+        return ("O dump do jogo está incompleto — arquivos ausentes ou vazios:"
+                + '\n' + listed)
+    update_dir = app.get("update_dir") or ""
+    if update_dir:
+        if L.same_folder(update_dir, app.get("game_dir") or "."):
+            return ("Use pastas separadas para o jogo e para a atualização, "
+                    "ou deixe a atualização vazia.")
+        missing = L.missing_game_files(update_dir, L.REQUIRED_UPDATE_FILES)
+        if missing:
+            listed = ", ".join(str(m[0] if isinstance(m, tuple) else m) for m in missing[:8])
+            return (f"A pasta da atualização está incompleta (faltam: {listed}). "
+                    "Ela precisa de eboot.bin e sce_sys.")
+    if not L.find_tool("gow3-probe.exe"):
+        return ("gow3-probe.exe não encontrado em out/ ou bin/ do port — "
+                "compile o port (bash build.sh) ou use uma build empacotada.")
+    return None
+
+
+MONITOR_SRC = r"""
+import json, os, subprocess, sys
+pid_file, exit_file, env_file, log_file, cmd_json, cwd = sys.argv[1:7]
+log = open(log_file, "w", encoding="utf-8", errors="replace")
+env = json.load(open(env_file, encoding="utf-8"))
+env = {k: v for k, v in env.items()}
+try:
+    proc = subprocess.Popen(json.loads(cmd_json), cwd=cwd, env=env,
+                            stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+                            creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+except OSError as error:
+    log.write("Não foi possível iniciar o processo: " + str(error) + chr(10))
     log.close()
-    RUN_PID.write_text(str(process.pid), encoding="utf-8")
-    return {"ok": True, "pid": process.pid, "log": str(RUN_LOG)}
+    open(exit_file, "w").write("127")
+else:
+    open(pid_file, "w").write(str(proc.pid))
+    rc = proc.wait()
+    log.close()
+    open(exit_file, "w").write(str(rc))
+"""
+
+
+def cmd_play() -> dict:
+    import os
+    app = app_settings()
+    problem = _check_play_prerequisites(app)
+    if problem:
+        return {"error": problem}
+    # comando real do port — ou substituto declarado por teste de integração
+    if os.environ.get("GOW3_CINEMATIC_RUN_CMD"):
+        command = json.loads(os.environ["GOW3_CINEMATIC_RUN_CMD"])
+        cwd = os.environ.get("GOW3_CINEMATIC_RUN_CWD") or str(L.PORT_DIR)
+        env = dict(os.environ)
+    else:
+        command = L.run_command()
+        cwd = str(L.PORT_DIR)
+        env = L.game_environment(app)
+    monitor = Path(tempfile.gettempdir()) / "gow3-cinematic-monitor.py"
+    monitor.write_text(MONITOR_SRC, encoding="utf-8")
+    exit_file = Path(tempfile.gettempdir()) / "gow3-cinematic-run.exit"
+    env_file = Path(tempfile.gettempdir()) / "gow3-cinematic-run.env.json"
+    for stale in (RUN_PID, exit_file):
+        try:
+            stale.unlink()
+        except OSError:
+            pass
+    env_file.write_text(json.dumps({str(k): str(v) for k, v in env.items()}), encoding="utf-8")
+    try:
+        subprocess.Popen(
+            [sys.executable, str(monitor), str(RUN_PID), str(exit_file), str(env_file),
+             str(RUN_LOG), json.dumps(command), cwd],
+            stdin=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "DETACHED_PROCESS", 0)
+            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+    except OSError as error:
+        return {"error": f"Não foi possível iniciar: {error}"}
+    # pequena espera: falhas imediatas (ex.: binário ausente) já aparecem no status
+    import time
+    for _ in range(20):
+        time.sleep(0.05)
+        try:
+            pid = int(RUN_PID.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            pid = 0
+        if pid:
+            break
+    return {"ok": True, "pid": pid or None, "log": str(RUN_LOG)}
 
 
 def cmd_play_status() -> dict:
+    """Status do processo monitorado: liveness por PID (somente leitura) e CÓDIGO DE
+    SAÍDA REAL gravado pelo monitor quando o run.py termina."""
+    exit_file = Path(tempfile.gettempdir()) / "gow3-cinematic-run.exit"
     try:
         pid = int(RUN_PID.read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
         pid = 0
     running = pid_alive(pid)
+    exit_code = None
+    try:
+        exit_code = int(exit_file.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        pass
     tail = ""
     try:
-        tail = RUN_LOG.read_text(encoding="utf-8", errors="replace")[-2000:]
+        text = RUN_LOG.read_text(encoding="utf-8", errors="replace")
+        lines = [line for line in text.splitlines() if line.strip()]
+        tail = '\n'.join(lines[-12:])
     except OSError:
         pass
     outcome = None
-    if not running and tail:
-        lowered = tail.lower()
-        if "traceback" in lowered or "não foi possível" in lowered or "could not" in lowered:
-            outcome = "error"
-        elif pid:
+    last_line = tail.splitlines()[-1] if tail else ""
+    if not running:
+        if exit_code is None:
+            outcome = "unknown"          # monitor não registrou (reinício/limpeza)
+        elif exit_code == 0:
             outcome = "finished"
-    return {"running": running, "pid": pid or None, "outcome": outcome, "tail": tail}
+        else:
+            outcome = "error"
+    return {"running": running, "pid": pid or None, "exit_code": exit_code,
+            "outcome": outcome, "last_line": last_line, "tail": tail}
 
 
 def main() -> int:

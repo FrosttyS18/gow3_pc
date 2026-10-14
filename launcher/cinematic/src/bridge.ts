@@ -73,7 +73,9 @@ export interface BridgeState {
 export interface PlayStatus {
   running: boolean
   pid: number | null
-  outcome: "error" | "finished" | null
+  exit_code: number | null
+  outcome: "error" | "finished" | "unknown" | null
+  last_line: string
   tail: string
 }
 
