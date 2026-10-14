@@ -197,8 +197,7 @@ class ProcessLivenessTests(unittest.TestCase):
         self.assertFalse(bridge.pid_alive(-1))
 
 
-if __name__ == "__main__":
-    unittest.main()
+
 
 
 class ControlsCasefoldTests(BridgeFixture):
@@ -261,4 +260,24 @@ class ResolvePathTests(BridgeFixture):
 
     def test_resolve_user_dir(self):
         _, r = self.bridge({"cmd": "resolve_path", "name": "user"})
-        self.assertIn("user", r.get("path", ""))
+        path = r.get("path", "")
+        self.assertTrue(path.endswith("user"),
+                        f"deveria terminar em /user (DATA_DIR/user), veio: {path}")
+
+    def test_resolve_user_empty_returns_data_dir_user(self):
+        """user_dir vazio no settings: resolve_path('user') deve dar DATA_DIR/user, não DATA_DIR."""
+        saved = json.loads((self.appdata / "gow3-launcher" / "settings.json").read_text(encoding="utf-8")) \
+            if (self.appdata / "gow3-launcher" / "settings.json").exists() else {}
+        saved["user_dir"] = ""
+        (self.appdata / "gow3-launcher").mkdir(parents=True, exist_ok=True)
+        (self.appdata / "gow3-launcher" / "settings.json").write_text(json.dumps(saved), encoding="utf-8")
+        _, r = self.bridge({"cmd": "resolve_path", "name": "user"})
+        path = r.get("path", "")
+        self.assertTrue(path.endswith("user"),
+                        f"user_dir vazio deveria resolver para DATA_DIR/user, veio: {path}")
+        self.assertEqual(path, str(self.data / "user"),
+                         f"deveria ser exatamente DATA_DIR/user, veio: {path}")
+
+
+if __name__ == "__main__":
+    unittest.main()

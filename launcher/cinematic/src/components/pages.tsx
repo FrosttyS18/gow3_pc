@@ -489,7 +489,7 @@ export function AdvancedPage({ state, refresh }: P) {
       </Section>
       <Section title={t("Log")}>
         <div className="inline-row">
-          <ActionButton onClick={() => bridge.openInExplorer(String(state.app.user_dir || ""))}>Pasta de saves</ActionButton>
+          <ActionButton onClick={() => bridge.openInExplorer(state.app.user_dir ? String(state.app.user_dir) : "user")}>Pasta de saves</ActionButton>
           <ActionButton onClick={() => bridge.openInExplorer("gow3.ini")}>gow3.ini</ActionButton>
         </div>
         <div className="inline-row">

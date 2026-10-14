@@ -86,7 +86,7 @@ pode sobrepor este contrato sem decisão explícita do mantenedor.**
 
 - A ponte Python importa `gow3_launcher_win` como BIBLIOTECA (sem Tk).
 - Chaves/listas/valores vêm SEMPRE do backend (nada inventado no frontend).
-- Patches: `_resolve_patches_dir` com fallback para o pacote em Downloads.
+- Patches: `_resolve_patches_dir` usa a MESMA resolucao de `game_environment()` para GOW3_PATCHES_DIR (fonte unica, sem fallback divergente; o usuario configura `patches_dir` no backend para apontar para pastas externas).
 - Persistência: settings.json / gow3.ini / mods.json / patches.json / mods_presets.json.
 
 ## 8. SUPERVISÃO DE PROCESSOS

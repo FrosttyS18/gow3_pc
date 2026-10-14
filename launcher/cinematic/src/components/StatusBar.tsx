@@ -9,9 +9,7 @@ export function StatusBar({ summary, missing, bridgeError, updateNotice }: {
   return (
     <footer className="statusbar">
       <div className="line">
-        {updateNotice && !bridgeError
-          ? <span className="dim">{updateNotice}</span>
-        : bridgeError
+        {bridgeError
           ? <span className="dim">ponte Python indisponível — {bridgeError}</span>
           : <>
               {summary}
@@ -21,6 +19,7 @@ export function StatusBar({ summary, missing, bridgeError, updateNotice }: {
             </>}
       </div>
       <div className="rule" aria-hidden="true" />
+      {updateNotice && <div className="update-note" role="status">{updateNotice}</div>}
     </footer>
   )
 }
