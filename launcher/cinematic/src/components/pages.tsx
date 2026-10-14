@@ -417,12 +417,10 @@ export function ControlsPage({ state, refresh }: P) {
               <input className="text key" value={r.key} aria-label={`Tecla de ${r.ps_name}`}
                 onChange={(e) => save(rows.map((row) => row.button === r.button ? { ...row, key: e.target.value } : row))} />
               {r.remappable ? (
-                <select className="pad-select" value={r.pad} aria-label={`Botão do controle para ${r.ps_name}`}
-                  onChange={(e) => save(rows.map((row) => row.button === r.button ? { ...row, pad: e.target.value } : row))}>
-                  {Object.entries(labels).map(([name, label]) => (
-                    <option key={name} value={name}>{label}</option>
-                  ))}
-                </select>
+                <Dropdown width={240} value={r.pad}
+                  choices={Object.entries(labels).map(([value, label]) => ({ value, label }))}
+                  onChange={(v) => save(rows.map((row) => row.button === r.button ? { ...row, pad: v } : row))}
+                  label={`Botão do controle para ${r.ps_name}`} />
               ) : (
                 <span className="fixed">{r.button === "touchpad_left" ? "L1 + Touchpad direito"
                   : `${r.ps_name} (gatilho)`}</span>

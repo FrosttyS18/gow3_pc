@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react"
 import { bridge, MusicState } from "../bridge"
 
-/** Música ambiente (canto superior esquerdo, discreto): apenas mudo + volume.
- *  A faixa é o MP3 local do mantenedor; autoplay começa na primeira interação
- *  (limitação do WebView2), volume e mudo persistem em settings.json e o
- *  fade-out de 2s ao JOGAR não bloqueia a inicialização. */
+/* Controle de música (canto superior esquerdo) — referência do mantenedor:
+ * estado INICIAL RECOLHIDO: ícone de alto-falante branco + texto "Música"
+ * leve sobre superfície preta com borda vermelha arredondada. O slider de
+ * volume SÓ aparece ao interagir (hover/foco), com fechamento previsível.
+ * Apenas mudo/reativação e volume — nenhum outro controle. */
 export function MusicPlayer({ state, onChange }: { state: MusicState; onChange: () => void }) {
   const audio = useRef<HTMLAudioElement | null>(null)
   const [src, setSrc] = useState<string | null>(null)
@@ -27,9 +28,7 @@ export function MusicPlayer({ state, onChange }: { state: MusicState; onChange: 
       step()
     }
     const kick = () => {  // WebView2 autoplay: a primeira interação libera o áudio
-      if (element.src && element.paused) {
-        element.play().catch(() => {})
-      }
+      if (element.src && element.paused) element.play().catch(() => {})
       window.removeEventListener("pointerdown", kick)
     }
     window.addEventListener("gow3:fade-music", fade)
@@ -49,7 +48,7 @@ export function MusicPlayer({ state, onChange }: { state: MusicState; onChange: 
       setSrc(url)
       audio.current.src = url
       audio.current.volume = muted ? 0 : volume
-      audio.current.play().catch(() => {})  // se bloqueado, a primeira interação inicia
+      audio.current.play().catch(() => {})
     }).catch(() => setSrc(null))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.file, state.default_path])
@@ -73,14 +72,25 @@ export function MusicPlayer({ state, onChange }: { state: MusicState; onChange: 
 
   return (
     <div className="music" data-has-audio={src ? "yes" : "no"}>
-      <button onClick={toggleMute} aria-label={muted ? "Ativar som" : "Silenciar"}>
-        {muted || volume === 0
-          ? <svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentColor" d="M3 9v6h4l5 5V4L7 9H3zm13.5 3 3.5 3.5-1.4 1.4L15 13.4 11.5 17l-1.4-1.4L13.6 12l-3.5-3.6L11.5 7l3.5 3.6L18.6 7 20 8.4 16.5 12z" /></svg>
-          : <svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentColor" d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a6.8 6.8 0 0 1 0 13.4v2.1a8.8 8.8 0 0 0 0-17.6z" /></svg>}
+      <button type="button" className="music-main" onClick={toggleMute}
+        aria-label={muted ? "Ativar música" : "Silenciar música"}
+        aria-pressed={muted}>
+        {muted || volume === 0 ? (
+          <svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="currentColor" d="M3 9v6h4l5 5V4L7 9H3zm13.5 3 3.5 3.5-1.4 1.4L15 13.4 11.5 17l-1.4-1.4L13.6 12l-3.5-3.6L11.5 7l3.5 3.6L18.6 7 20 8.4 16.5 12z" />
+          </svg>
+        ) : (
+          <svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="currentColor" d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a6.8 6.8 0 0 1 0 13.4v2.1a8.8 8.8 0 0 0 0-17.6z" />
+          </svg>
+        )}
+        <span className="music-label">Música</span>
       </button>
-      <input type="range" min={0} max={1} step={0.01} value={volume}
-        onChange={(e) => changeVolume(Number(e.target.value))}
-        aria-label="Volume da música ambiente" />
+      <div className="music-volume" aria-label="Volume da música ambiente">
+        <input type="range" min={0} max={1} step={0.01} value={volume}
+          onChange={(e) => changeVolume(Number(e.target.value))}
+          aria-label="Volume da música ambiente" />
+      </div>
     </div>
   )
 }
