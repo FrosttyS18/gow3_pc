@@ -199,3 +199,66 @@ class ProcessLivenessTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ControlsCasefoldTests(BridgeFixture):
+    """E: controls_set com casefold + só CONTROLS válidos + fixos preservados."""
+
+    def test_casefold_same_as_default_not_saved(self):
+        _, r = self.bridge({"cmd": "controls_set",
+            "key": {"cross": "space"},  # mesmo que "Space" (casefold)
+            "pad": {"cross": "A"},      # mesmo que "a" (casefold)
+            "pad_style": "playstation"})
+        self.assertTrue(r["ok"])
+        _, state = self.bridge({"cmd": "state"})
+        key_saved = state["controls_cfg"].get("controls", {}).get("key", {})
+        pad_saved = state["controls_cfg"].get("controls", {}).get("pad", {})
+        self.assertNotIn("cross", key_saved, "casefold-igual ao padrão não deveria ser gravado")
+        self.assertNotIn("cross", pad_saved, "casefold-igual ao padrão não deveria ser gravado")
+
+    def test_unknown_button_ignored(self):
+        _, r = self.bridge({"cmd": "controls_set",
+            "key": {"FAKE_BUTTON": "X", "cross": "Return"},
+            "pad": {}, "pad_style": "playstation"})
+        self.assertTrue(r["ok"])
+        _, state = self.bridge({"cmd": "state"})
+        key_saved = state["controls_cfg"].get("controls", {}).get("key", {})
+        self.assertNotIn("FAKE_BUTTON", key_saved, "botão não previsto em CONTROLS não deveria ser gravado")
+        self.assertIn("cross", key_saved, "cross=Return (mudança real) deveria ser gravado")
+
+    def test_fixed_button_not_grabbable(self):
+        """touchpad_left tem default_pad='' (fixo): não deve ser gravável em pad."""
+        _, r = self.bridge({"cmd": "controls_set",
+            "key": {}, "pad": {"touchpad_left": "L1 + Touchpad right"},
+            "pad_style": "playstation"})
+        self.assertTrue(r["ok"])
+        _, state = self.bridge({"cmd": "state"})
+        pad_saved = state["controls_cfg"].get("controls", {}).get("pad", {})
+        self.assertNotIn("touchpad_left", pad_saved, "botão fixo não deveria ser gravável")
+
+
+class ExternalPatchesPreservationTests(BridgeFixture):
+    """P0-2: seleções não visíveis preservadas em set_external_patches."""
+
+    def test_invisible_selections_preserved(self):
+        chosen = {"enabled": ["old_v1/A", "old_v1/B"], "disabled": ["old_v1/C"]}
+        (self.data / "patches.json").write_text(json.dumps(chosen), encoding="utf-8")
+        _, r = self.bridge({"cmd": "set_external_patches",
+            "enabled": ["D"], "disabled": ["A"]})
+        self.assertTrue(r["ok"])
+        saved = json.loads((self.data / "patches.json").read_text(encoding="utf-8"))
+        self.assertIn("old_v1/B", saved["enabled"], "seleção de outra versão perdida")
+        self.assertIn("old_v1/C", saved["disabled"], "seleção de outra versão perdida")
+
+
+class ResolvePathTests(BridgeFixture):
+    """A: resolve_path resolve caminhos relativos pelo backend."""
+
+    def test_resolve_gow3_ini(self):
+        _, r = self.bridge({"cmd": "resolve_path", "name": "gow3.ini"})
+        self.assertIn("gow3.ini", r.get("path", ""))
+        self.assertTrue(str(self.data) in r.get("path", ""), "deveria resolver para o GOW3_DATA_DIR")
+
+    def test_resolve_user_dir(self):
+        _, r = self.bridge({"cmd": "resolve_path", "name": "user"})
+        self.assertIn("user", r.get("path", ""))

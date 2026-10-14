@@ -1,14 +1,17 @@
 /** Bottom-left indicators: the port's own summary line (Native (1080p) · N FPS engine ·
  *  N patches) over a thin blood rule — exactly the Figma footer. */
-export function StatusBar({ summary, missing, bridgeError }: {
+export function StatusBar({ summary, missing, bridgeError, updateNotice }: {
   summary: string
   missing: string[]
   bridgeError: string
+  updateNotice?: string
 }) {
   return (
     <footer className="statusbar">
       <div className="line">
-        {bridgeError
+        {updateNotice && !bridgeError
+          ? <span className="dim">{updateNotice}</span>
+        : bridgeError
           ? <span className="dim">ponte Python indisponível — {bridgeError}</span>
           : <>
               {summary}

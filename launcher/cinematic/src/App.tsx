@@ -16,6 +16,7 @@ export default function App() {
   const [phase, setPhase] = useState<PlayPhase>("idle")
   const [playError, setPlayError] = useState("")
   const [bridgeError, setBridgeError] = useState("")
+  const [updateNotice, setUpdateNotice] = useState("")
   const [musicMuted, setMusicMuted] = useState(true)
   const [language, setLanguageState] = useState("en")
   const startedAt = useRef(0)
@@ -32,7 +33,7 @@ export default function App() {
   useEffect(() => {
     if (!state?.app.check_updates) return
     bridge.updateCheck().then((r) => {
-      if (r.newer) setBridgeError('Versao ' + r.latest + ' disponivel')
+      if (r.newer) setUpdateNotice('Versão ' + r.latest + ' disponível — ver Avançado')
     }).catch(() => {})
   }, [state?.app.check_updates]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (state) setMusicMuted(state.music.muted) }, [state?.music.muted]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -148,6 +149,7 @@ export default function App() {
               summary={state.game.summary}
               missing={state.game.missing_files}
               bridgeError={bridgeError}
+              updateNotice={updateNotice}
             />
             <PlayButton
               phase={phase}

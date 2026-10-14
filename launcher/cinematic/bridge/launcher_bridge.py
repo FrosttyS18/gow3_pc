@@ -169,8 +169,12 @@ def all_choices(app: dict) -> dict:
 
 
 def _resolve_patches_dir(app: dict) -> Path:
-    """A MESMA resolução de game_environment(): o diretório exibido é o diretório
-    que o runtime usa como GOW3_PATCHES_DIR — sem fallback que crie divergência."""
+    """Fonte ÚNICA de verdade: a MESMA resolução de game_environment() para
+    GOW3_PATCHES_DIR. Se o usuário configurar patches_dir no backend (ex.: apontando
+    para a pasta do pacote), AMBOS (UI e runtime) usam o mesmo diretório automaticamente.
+    O fallback anterior para Downloads foi removido porque criava divergência: a UI
+    listava patches que o runtime não carregava. Para usar os patches do pacote, o
+    usuário deve configurar patches_dir na página Patches (mesma ação do Tkinter)."""
     return Path(app.get("patches_dir") or "") if app.get("patches_dir") else L.DATA_DIR / "patches"
 
 
@@ -395,24 +399,32 @@ def cmd_backup_restore(name: str) -> dict:
 
 
 def cmd_controls_set(key: dict, pad: dict, pad_style: str) -> dict:
-    """Persiste SÓ os mapeamentos que diferem do padrão (mesma semântica do
-    Tkinter control_changes()) — valores padrão não viram overrides permanentes."""
+    """Mesma semântica do Tkinter control_changes(): casefold() para comparação,
+    só botões previstos em CONTROLS, só valores que diferem do padrão, e o
+    mapeamento vazio é preservado para botões fixos (touchpad_left, L2, R2)."""
     app = app_settings()
     if pad_style not in L.PAD_STYLES:
         return {"error": "pad_style inválido"}
     app["pad_style"] = pad_style
     controls = {"key": {}, "pad": {}}
-    defaults = {b: (k, p) for b, k, p in L.CONTROLS}
+    valid_buttons = {b.casefold(): (b, k, p) for b, k, p in L.CONTROLS}
     for kind, values in (("key", key), ("pad", pad)):
-        if isinstance(values, dict):
-            for button, value in values.items():
-                value = str(value).strip()
-                if not value:
-                    continue
-                default = defaults.get(str(button), ("", ""))
-                default_value = default[0] if kind == "key" else default[1]
-                if value != default_value:  # só grava o que difere do padrão
-                    controls[kind][str(button)] = value
+        if not isinstance(values, dict):
+            continue
+        column = 1 if kind == "key" else 2
+        for button, value in values.items():
+            value = str(value).strip()
+            if not value:
+                continue
+            lookup = valid_buttons.get(str(button).casefold())
+            if lookup is None:
+                continue  # botão não previsto em CONTROLS: ignora
+            _, default_key, default_pad = lookup
+            default_value = default_key if kind == "key" else default_pad
+            if not default_value:
+                continue  # botão fixo (sem mapeamento nesta coluna): não grava
+            if value.casefold() != default_value.casefold():
+                controls[kind][lookup[0]] = value  # grava o nome canônico do botão
     app["controls"] = controls
     save_app(app)
     return {"ok": True}
@@ -435,6 +447,23 @@ def cmd_update_check() -> dict:
         return {"error": f"Não foi possível verificar atualizações: {error}"}
     newer = L.version_tuple(version) > L.version_tuple(L.VERSION)
     return {"current": L.VERSION, "latest": version, "url": url, "page": page, "newer": newer}
+
+
+def cmd_resolve_path(name: str) -> dict:
+    """Resolve um nome relativo para o caminho real usado pelo backend
+    (gow3.ini → GOW3_CONFIG; user → DATA_DIR/user; port → PORT_DIR)."""
+    name = name.strip().lower()
+    if name in ("gow3.ini", "ini"):
+        return {"path": str(L.ini_path())}
+    if name in ("user", "user_dir", "saves", "saves folder"):
+        return {"path": str(L.DATA_DIR / "user")}
+    if name in ("port", "port folder", "root"):
+        return {"path": str(L.PORT_DIR)}
+    if name in ("mods", "mods folder"):
+        return {"path": str(L.DATA_DIR / "mods")}
+    if name in ("patches", "patches folder"):
+        return {"path": str(_resolve_patches_dir(app_settings()))}
+    return {"path": str(L.DATA_DIR)}
 
 
 def cmd_log_read() -> dict:
@@ -628,6 +657,8 @@ def main() -> int:
             response = cmd_clear_cache()
         elif cmd == "update_check":
             response = cmd_update_check()
+        elif cmd == "resolve_path":
+            response = cmd_resolve_path(request.get("name", ""))
         elif cmd == "log_read":
             response = cmd_log_read()
         elif cmd == "play":

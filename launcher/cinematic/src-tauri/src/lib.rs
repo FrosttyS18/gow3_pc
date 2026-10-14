@@ -142,10 +142,28 @@ async fn pick_folder(app: tauri::AppHandle) -> Option<String> {
 }
 
 /// Opens a path in Windows Explorer (the port folder, gow3.ini, mods…).
+/// Abre um caminho no Explorer. Caminhos RELATIVOS são resolvidos pela ponte Python
+/// (ex.: "gow3.ini" vira o caminho de GOW3_CONFIG; "" vira DATA_DIR/user).
 #[tauri::command]
 async fn open_in_explorer(path: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-        Command::new("explorer").arg(&path).spawn().map_err(|e| format!("explorer: {e}"))?;
+        let is_absolute = path.contains('/') || path.contains('\\') || path.contains(':');
+        let resolved = if is_absolute {
+            path
+        } else {
+            let req = format!("{{\"cmd\":\"resolve_path\",\"name\":\"{}\"}}", path);
+            match bridge_call_blocking(req) {
+                Ok(resp) => match serde_json::from_str::<serde_json::Value>(&resp) {
+                    Ok(v) => v.get("path").and_then(|p| p.as_str()).unwrap_or("").to_string(),
+                    Err(_) => path.clone(),
+                },
+                Err(_) => path.clone(),
+            }
+        };
+        if resolved.is_empty() {
+            return Err("caminho não resolvido".into());
+        }
+        Command::new("explorer").arg(&resolved).spawn().map_err(|e| format!("explorer: {e}"))?;
         Ok(())
     })
     .await
