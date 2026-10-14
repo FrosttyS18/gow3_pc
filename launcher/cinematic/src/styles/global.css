@@ -29,7 +29,7 @@
   --toggle-w: 66px;            /* 99 x 2/3 */
   --toggle-h: 33px;            /* 49.5 x 2/3 */
   --toggle-radius: 14.5px;     /* 21.74 x 2/3 */
-  --toggle-knob: 28.4px;       /* 42.55 x 2/3 */
+  --toggle-knob: 27px;         /* 42.55x2/3=28.37 ajustado p/ respiro >=2px */
   --focus-ring: 1px solid rgba(230, 224, 216, 0.45);
   --hover-ms: 200ms;
   --hover-ease: cubic-bezier(0.2, 0.7, 0.3, 1);
@@ -126,6 +126,18 @@ body { font-family: var(--font); color: var(--text); background: var(--bg); }
   outline: none;
 }
 .nav button.active { color: #ffffff; font-size: 25.65px; line-height: 32px; text-shadow: none; }
+/* Música: AÇÃO do menu (não rota): mesmo tipo/hover; ícone discreto; nunca .active */
+.nav button.music-toggle {
+  display: inline-flex; align-items: center; gap: 7px;
+  margin-top: 7px; color: #4c4c4c;
+}
+.nav button.music-toggle .music-icon { opacity: 0.85; flex: 0 0 auto; }
+.nav button.music-toggle[aria-pressed="false"] { color: #3a3a3a; }
+.nav button.music-toggle[aria-pressed="true"] { color: #5a5a5a; }
+.nav button.music-toggle:hover, .nav button.music-toggle:focus-visible {
+  color: #ffffff;
+}
+.nav button.music-toggle::after { content: none; }
 .nav button.active::after {
   content: ""; position: absolute; left: 50%; transform: translateX(-50%);
   bottom: -6px; width: 219px; height: 1px;
@@ -142,42 +154,6 @@ body { font-family: var(--font); color: var(--text); background: var(--bg); }
 .statusbar .rule {
   margin-top: 8px; width: 200px; height: 2px; border-radius: 1px;
   background: linear-gradient(90deg, var(--accent-hi), rgba(164, 22, 26, 0.35) 70%, transparent);
-}
-
-/* ---- música: faixa própria do topo (0–38px), acima do painel de vidro -------- */
-.music {
-  position: absolute; left: 24px; top: 5px; z-index: 30;
-  display: flex; align-items: center; height: 28px;
-}
-.music-main {
-  display: inline-flex; align-items: center; gap: 7px;
-  height: 27px; padding: 0 11px;
-  background: #000000;
-  border: var(--field-border-w) solid var(--figma-red);
-  border-radius: 9px;
-  color: #ffffff; cursor: pointer;
-  font-family: var(--font-light); font-size: 12px; font-weight: 300; letter-spacing: 0.02em;
-  transition: box-shadow var(--hover-ms) ease, border-color var(--hover-ms) ease, opacity var(--hover-ms) ease;
-}
-.music-main:hover, .music:focus-within .music-main {
-  border-color: var(--accent-hi);
-  box-shadow: 0 0 14px rgba(159, 0, 0, 0.35);
-}
-.music-main:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
-.music.unavailable .music-main { opacity: 0.6; }
-.music-label { line-height: 1; }
-.music-volume {
-  display: flex; align-items: center;
-  max-width: 0; opacity: 0; overflow: hidden; margin-left: 0;
-  transition: max-width var(--hover-ms) var(--hover-ease), opacity var(--hover-ms) ease, margin-left var(--hover-ms) ease;
-}
-.music:hover .music-volume, .music:focus-within .music-volume { max-width: 120px; opacity: 1; margin-left: 9px; }
-.music-volume input[type="range"] { width: 100px; }
-.music-notice {
-  position: absolute; top: 32px; left: 0;
-  font-size: 11px; color: #e08080; background: rgba(0, 0, 0, 0.85);
-  border: 1px solid rgba(159, 0, 0, 0.6); border-radius: 4px;
-  padding: 4px 8px; max-width: 340px; white-space: normal;
 }
 
 /* ---- JOGAR ---------------------------------------------------------------------- */
@@ -259,7 +235,11 @@ body { font-family: var(--font); color: var(--text); background: var(--bg); }
 }
 .version { color: var(--muted); font-size: 12.5px; }
 
-/* ---- TOGGLE (componente compartilhado; medidas Figma 720p) ----------------------- */
+/* ---- TOGGLE: respiro interno >= 2px em todos os lados (720p) --------------------
+ * Nominal Figma: knob 28.37 => respiro vertical de apenas 1.5px em 720p (o "encostando"
+ * visto pelo mantenedor). Knob ajustado para 27px (desvio registrado: -1.37px) com
+ * inset 2.5px: respiro vertical 2.18px, lateral 2.5px, deslocamento ON calculado da
+ * largura REAL disponivel (padding box), nunca um translateX solto. */
 .toggle {
   position: relative; width: var(--toggle-w); height: var(--toggle-h);
   border-radius: var(--toggle-radius);
@@ -269,13 +249,13 @@ body { font-family: var(--font); color: var(--text); background: var(--bg); }
   transition: background var(--hover-ms) var(--hover-ease), border-color var(--hover-ms) var(--hover-ease);
 }
 .toggle .knob {
-  position: absolute; top: 2.3px; left: 2.3px;
+  position: absolute; top: 2.5px; left: 2.5px;
   width: var(--toggle-knob); height: var(--toggle-knob);
   border-radius: 50%;
   background: var(--figma-red); color: #ffffff;
   display: grid; place-items: center;
   box-shadow: 0.5px 1.4px 0.9px rgba(0, 0, 0, 0.25);   /* 0.82/2.05/1.39 x 2/3 */
-  transition: transform var(--hover-ms) var(--hover-ease),
+  transition: left var(--hover-ms) var(--hover-ease),
     background var(--hover-ms) var(--hover-ease), color var(--hover-ms) var(--hover-ease);
 }
 .toggle .state {
@@ -285,12 +265,12 @@ body { font-family: var(--font); color: var(--text); background: var(--bg); }
   transition: left var(--hover-ms) var(--hover-ease), right var(--hover-ms) var(--hover-ease);
 }
 /* OFF: texto à DIREITA do círculo (que está à esquerda) */
-.toggle .state { right: 11px; left: auto; }
+.toggle .state { right: 10px; left: auto; }
 /* ON: fundo vermelho, borda preta, círculo branco desliza à direita com seta preta,
    texto ON fica à ESQUERDA do círculo */
 .toggle.on { background: var(--figma-red); border-color: #000000; }
-.toggle.on .knob { transform: translateX(32.6px); background: #ffffff; color: #000000; }
-.toggle.on .state { left: 11px; right: auto; }
+.toggle.on .knob { left: calc(100% - var(--toggle-knob) - 2.5px); background: #ffffff; color: #000000; }
+.toggle.on .state { left: 10px; right: auto; }
 .toggle:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
 
 /* ---- DROPDOWN (componente compartilhado; lista estilizada) ----------------------- */

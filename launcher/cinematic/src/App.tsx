@@ -4,7 +4,7 @@ import { PAGES } from "./components/pages"
 import { NavMenu } from "./components/NavMenu"
 import { PlayButton, PlayPhase } from "./components/PlayButton"
 import { StatusBar } from "./components/StatusBar"
-import { MusicPlayer } from "./components/MusicPlayer"
+import { useAmbientMusic } from "./components/useAmbientMusic"
 import { TitleBar } from "./components/TitleBar"
 
 export type Page = "home" | (typeof PAGES)[number]["id"]
@@ -12,6 +12,7 @@ export type Page = "home" | (typeof PAGES)[number]["id"]
 export default function App() {
   const [state, setState] = useState<BridgeState | null>(null)
   const [page, setPage] = useState<Page>("home")
+  const [musicMuted, setMusicMuted] = useState(true)
   const [phase, setPhase] = useState<PlayPhase>("idle")
   const [playError, setPlayError] = useState("")
   const [bridgeError, setBridgeError] = useState("")
@@ -22,6 +23,16 @@ export default function App() {
   }, [])
 
   useEffect(() => { refresh() }, [refresh])
+  useEffect(() => { if (state) setMusicMuted(state.music.muted) }, [state?.music.muted]) // eslint-disable-line react-hooks/exhaustive-deps
+  useAmbientMusic(state?.music, musicMuted)
+
+  // Música é uma AÇÃO do menu: alterna o mute, persiste SÓ essa preferência e
+  // não muda a página corrente (volume é fixo em 5% — sem slider, sem painel).
+  const toggleMusic = () => {
+    const next = !musicMuted
+    setMusicMuted(next)
+    bridge.setApp({ ambient_muted: next }).catch((e) => console.error("ambient_muted", e))
+  }
 
   // Poll do processo: preparing -> running -> finished/error pelo CÓDIGO DE SAÍDA REAL
   // gravado pelo monitor (não por palavras no log). Falhas de polling repetidas
@@ -92,7 +103,7 @@ export default function App() {
             ;(e.target as HTMLImageElement).parentElement?.appendChild(el)
           }} />
       </div>
-      <NavMenu page={page} onNavigate={setPage} />
+      <NavMenu page={page} onNavigate={setPage} musicMuted={musicMuted} onToggleMusic={toggleMusic} />
       {state && (
         <>
           <StatusBar
@@ -100,7 +111,6 @@ export default function App() {
             missing={state.game.missing_files}
             bridgeError={bridgeError}
           />
-          <MusicPlayer state={state.music} />
           <PlayButton
             phase={phase}
             available={state.game.found}

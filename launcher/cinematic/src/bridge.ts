@@ -88,6 +88,16 @@ declare global {
   }
 }
 
+/** Gravações no MESMO arquivo nunca correm concorrentes: cada setApp/preset/
+ *  modsSet entra numa fila única — o último clique sempre vence, sem corrida
+ *  entre processos da ponte lendo/escrevendo settings.json ao mesmo tempo. */
+let writeChain: Promise<unknown> = Promise.resolve()
+function enqueueWrite<T>(op: () => Promise<T>): Promise<T> {
+  const next = writeChain.then(op, op)
+  writeChain = next.catch(() => {})
+  return next
+}
+
 async function call<T>(request: Record<string, unknown>): Promise<T> {
   if (!window.__GOW3_BRIDGE__) {
     throw new Error("ponte indisponível (fora do app Tauri)")
@@ -103,7 +113,7 @@ export const bridge = {
   setIni: (values: Record<string, string | boolean>) =>
     call<{ ok: true; ini: Record<string, string> }>({ cmd: "set_ini", values }),
   setApp: (values: Record<string, string | number | boolean>) =>
-    call<{ ok: true }>({ cmd: "set_app", values }),
+    enqueueWrite(() => call<{ ok: true }>({ cmd: "set_app", values })),
   setGamePatches: (names: string[]) =>
     call<{ ok: true }>({ cmd: "set_game_patches", names }),
   setExternalPatches: (enabled: string[], disabled: string[]) =>
