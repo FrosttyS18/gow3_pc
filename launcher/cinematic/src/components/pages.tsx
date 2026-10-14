@@ -15,40 +15,40 @@ export function DisplayPage({ state, refresh }: P) {
   const setApp = (k: string, v: boolean) => run(() => bridge.setApp({ [k]: v }))
   return (
     <div className="settings">
-      <h1>{t("Display & FPS")}</h1>
+      <h1>{t("Play") === "Jogar" ? "Tela" : "Display"}</h1>
       {error && <p className="op-error">{error}</p>}
       <Section title={t("Window")}>
-        <Field label="Modo de exibição" hint="Sem bordas cobre a tela sem trocar o modo do monitor.">
+        <Field label={t("Play") === "Jogar" ? "Modo de exibição" : "Display mode"} hint="Sem bordas cobre a tela sem trocar o modo do monitor.">
           <Dropdown value={ini.display_mode ?? "windowed"} choices={state.choices.display_mode}
-            onChange={(v) => setIni("display_mode", v)} label="Modo de exibição" />
+            onChange={(v) => setIni("display_mode", v)} label={t("Play") === "Jogar" ? "Modo de exibição" : "Display mode"} />
         </Field>
         <Field label="VSync" hint="Desligado permite tearing para a menor latência.">
           <Toggle value={ini.vsync === "1"} onChange={(v) => setIni("vsync", v)} label="VSync" />
         </Field>
-        <Field label="Permitir saída HDR" hint="Com HDR ativo no Windows e monitor compatível.">
-          <Toggle value={!!app.hdr} onChange={(v) => setApp("hdr", v)} label="Permitir saída HDR" />
+        <Field label={t("Play") === "Jogar" ? "Permitir saída HDR" : "Allow HDR output"} hint="Com HDR ativo no Windows e monitor compatível.">
+          <Toggle value={!!app.hdr} onChange={(v) => setApp("hdr", v)} label={t("Play") === "Jogar" ? "Permitir saída HDR" : "Allow HDR output"} />
         </Field>
       </Section>
-      <Section title={t("Sharpening (RCAS)")}>
-        <Field label="Ampliar com FSR 1"
+      <Section title={t("Play") === "Jogar" ? "Escala e nitidez" : "Scaling & sharpening"}>
+        <Field label={t("Play") === "Jogar" ? "Ampliar com FSR 1" : "Upscale with FSR 1"}
                hint="Amplia uma imagem menor do jogo para a janela; com resolução 720p aumenta os FPS.">
-          <Toggle value={ini.fsr1 === "1"} onChange={(v) => setIni("fsr1", v)} label="Ampliar com FSR 1" />
+          <Toggle value={ini.fsr1 === "1"} onChange={(v) => setIni("fsr1", v)} label={t("Play") === "Jogar" ? "Ampliar com FSR 1" : "Upscale with FSR 1"} />
         </Field>
-        <Field label="Nitidez da tela (RCAS)"
+        <Field label={t("Play") === "Jogar" ? "Nitidez da tela (RCAS)" : "Screen sharpening (RCAS)"}
                hint="Afiará a imagem final; com o upscaler ligado use a nitidez dele (Gráficos) — uma anula a outra.">
-          <Toggle value={ini.rcas === "1"} onChange={(v) => setIni("rcas", v)} label="Nitidez da tela (RCAS)" />
+          <Toggle value={ini.rcas === "1"} onChange={(v) => setIni("rcas", v)} label={t("Play") === "Jogar" ? "Nitidez da tela (RCAS)" : "Screen sharpening (RCAS)"} />
         </Field>
-        <Field label="Intensidade da nitidez">
+        <Field label={t("Play") === "Jogar" ? "Intensidade da nitidez" : "Sharpening strength"}>
           <input type="range" min={0} max={100} value={Number(ini.rcas_strength ?? 75)}
             onChange={(e) => setIni("rcas_strength", e.target.value)}
-            aria-label="Intensidade da nitidez" />
+            aria-label={t("Play") === "Jogar" ? "Intensidade da nitidez" : "Sharpening strength"} />
         </Field>
       </Section>
-      <Section title={t("Show the FPS counter")}>
-        <Field label="Mostrar sobreposição de desempenho"
+      <Section title={t("Play") === "Jogar" ? "Sobreposição" : "Overlay"}>
+        <Field label={t("Play") === "Jogar" ? "Mostrar sobreposição de desempenho" : "Show performance overlay"}
                hint="Itens, tamanho e canto: menu do jogo (Insert / R3+L2) › Sobreposição.">
           <Toggle value={ini.show_fps === "1"} onChange={(v) => setIni("show_fps", v)}
-            label="Mostrar sobreposição de desempenho" />
+            label={t("Play") === "Jogar" ? "Mostrar sobreposição de desempenho" : "Show performance overlay"} />
         </Field>
       </Section>
     </div>
@@ -64,16 +64,16 @@ export function GraphicsPage({ state, refresh }: P) {
   const setApp = (k: string, v: boolean) => run(() => bridge.setApp({ [k]: v }))
   return (
     <div className="settings">
-      <h1>{t("Graphics")}</h1>
+      <h1>{t("Play") === "Jogar" ? "Gráficos" : "Graphics"}</h1>
       {error && <p className="op-error">{error}</p>}
-      <Section title={t("Upscaling")}>
+      <Section title={t("Play") === "Jogar" ? "Upscaling" : "Upscaling"}>
         <Field label="Ativar o upscaler (experimental)" restart
                hint="Desligado (padrão): o jogo roda sem upscaling temporal. Estes upscalers ainda não estão calibrados para este jogo: espere ghosting ou cintilação. FSR 3.1 não exige mais nada; FSR 4 precisa dos arquivos abaixo.">
           <Toggle value={!!state.app.experimental_upscaler}
             onChange={(v) => setApp("experimental_upscaler", v)} label="Ativar o upscaler" />
         </Field>
       </Section>
-      <Section title={t("Upscaling")}>
+      <Section title={t("Play") === "Jogar" ? "Upscaling" : "Upscaling"}>
         <Field label="Upscaler"
                hint="Upscaling temporal com os vetores de movimento do próprio jogo. FSR 4 exige GPU com INT8; sem isso o jogo volta ao FSR 3.1 sozinho.">
           <Dropdown value={ini.upscaler ?? "fsr4"} choices={state.choices.upscaler}
@@ -127,9 +127,9 @@ export function PerformancePage({ state, refresh }: P) {
   const setApp = (k: string, v: string | boolean) => run(() => bridge.setApp({ [k]: v }))
   return (
     <div className="settings">
-      <h1>{t("Performance")}</h1>
+      <h1>{t("Play") === "Jogar" ? "Desempenho" : "Performance"}</h1>
       {error && <p className="op-error">{error}</p>}
-      <Section title={t("Frame rate")}>
+      <Section title={t("Play") === "Jogar" ? "Taxa de quadros" : "Frame rate"}>
         <Field label="Limite de quadros" hint="A taxa do motor (abaixo) é o teto.">
           <Dropdown value={ini.fps_limit ?? "0"} choices={state.choices.fps_limit}
             onChange={(v) => setIni("fps_limit", v)} label="Limite de quadros" />
@@ -148,7 +148,7 @@ export function PerformancePage({ state, refresh }: P) {
             onChange={(v) => setIni("render_resolution", v)} label="Resolução de renderização" />
         </Field>
       </Section>
-      <Section title={t("Graphics")}>
+      <Section title={t("Play") === "Jogar" ? "Shaders" : "Shaders"}>
         <Field label="Cache de pipelines (teste A/B)" restart
                hint="Reaproveita pipelines Vulkan salvos. Desligue para comparar FPS com a compilação normal.">
           <Toggle value={app.pipeline_binary_cache !== false}
@@ -170,7 +170,7 @@ export function PerformancePage({ state, refresh }: P) {
             onChange={(v) => setApp("parallel_warmup", v)} label="Carregamento paralelo" />
         </Field>
       </Section>
-      <Section title={t("Graphics")}>
+      <Section title={t("Play") === "Jogar" ? "Shaders" : "Shaders"}>
         <Field label="Placa de vídeo" restart
                hint="A GPU em que o jogo roda. Escolha a dedicada se o jogo usar a integrada.">
           <Dropdown value={String(app.gpu_id ?? "")} choices={state.choices.gpu_id}
@@ -231,9 +231,9 @@ export function GamePage({ state, refresh }: P) {
   })
   return (
     <div className="settings">
-      <h1>{t("Game & effects")}</h1>
+      <h1>{t("Play") === "Jogar" ? "Jogo" : "Game"}</h1>
       {error && <p className="op-error">{error}</p>}
-      <Section title={t("Game & effects")}>
+      <Section title={t("Play") === "Jogar" ? "Trapaças" : "Cheats"}>
         <Field label="Saltos duplos infinitos" hint="Repetir saltos no ar sem pousar. Também no menu de trapaças do jogo.">
           <Toggle value={ini.cheat_double_jumps === "1"} onChange={(v) => setIni("cheat_double_jumps", v)}
             label="Saltos duplos infinitos" />
@@ -244,7 +244,7 @@ export function GamePage({ state, refresh }: P) {
             label="Desbloquear Muito Difícil" />
         </Field>
       </Section>
-      <Section title={t("Game folder not set")}>
+      <Section title={t("Play") === "Jogar" ? "Pastas" : "Folders"}>
         <Field label="Pasta do jogo" hint="Seu dump do jogo (eboot.bin, sce_module, sce_sys): qualquer região e versão.">
           <PathField value={String(app.game_dir ?? "")} onPick={() => pickFolderAndSet("game_dir", refresh)} />
         </Field>
@@ -256,19 +256,19 @@ export function GamePage({ state, refresh }: P) {
           <PathField value={String(app.user_dir ?? "")} onPick={() => pickFolderAndSet("user_dir", refresh)} />
         </Field>
       </Section>
-      <Section title={t("Mods & patches")}>
+      <Section title={t("Play") === "Jogar" ? "Mods" : "Mods"}>
         <Field label={`Backups de saves (últimos ${state.backups.keep})`}
                hint="Feitos antes de cada início, do mais novo ao mais velho. Restaurar copia os saves atuais primeiro.">
           <span className="inline-row">
             <Dropdown value={backup || state.backups.names[0] || ""} choices={
               state.backups.names.map((n) => ({ value: n, label: n }))}
               onChange={setBackup} label="Backup" />
-            <ActionButton onClick={restore} disabled={busy || !(backup || state.backups.names[0])}>{t("Play")}</ActionButton>
+            <ActionButton onClick={restore} disabled={busy || !(backup || state.backups.names[0])}>{t("Play") === "Jogar" ? "Restaurar" : "Restore"}</ActionButton>
           </span>
         </Field>
         {backupMsg && <p className="op-ok">{backupMsg}</p>}
       </Section>
-      <Section title={t("Language")}>
+      <Section title={t("Play") === "Jogar" ? "Idioma" : "Language"}>
         <Field label="Idioma do jogo">
           <Dropdown value={String(app.language ?? "1")} choices={state.choices.language}
             onChange={(v) => run(() => bridge.setApp({ language: v }))} label="Idioma do jogo" />
@@ -295,7 +295,7 @@ export function PatchesPage({ state, refresh }: P) {
   }
   return (
     <div className="settings">
-      <h1>{t("Mods & patches")}</h1>
+      <h1>{t("Play") === "Jogar" ? "Patches" : "Patches"}</h1>
       {error && <p className="op-error">{error}</p>}
       <p className="page-intro">Mudanças aplicadas ao código do jogo ao iniciar.</p>
       <Section title={`Patches do jogo${p.version ? ` · ${p.title_id} · versão ${p.version}` : ""}`}>
@@ -307,7 +307,7 @@ export function PatchesPage({ state, refresh }: P) {
         ))}
         <p className="field-hint">Resolução e taxa de quadros seguem a página Desempenho.</p>
       </Section>
-      <Section title={t("Mods & patches")}>
+      <Section title={t("Play") === "Jogar" ? "Mods" : "Mods"}>
         <Field label="Pasta de patches"
                hint="Arquivos XML de patch shadPS4/GoldHEN para esta versão do jogo.">
           <PathField value={String(state.app.patches_dir ?? "")} onPick={() => pickFolderAndSet("patches_dir", refresh)} />
@@ -318,7 +318,7 @@ export function PatchesPage({ state, refresh }: P) {
             <Toggle value={e.enabled} onChange={(v) => toggleExternal(e.key, v)} label={e.key} />
           </Field>
         ))}
-        <ActionButton onClick={() => refresh()}>{t("Log")}</ActionButton>
+        <ActionButton onClick={() => refresh()}>{t("Play") === "Jogar" ? "Atualizar" : "Refresh"}</ActionButton>
       </Section>
     </div>
   )
@@ -342,10 +342,10 @@ export function ModsPage({ state, refresh }: P) {
                                : [...new Set([...m.disabled, name])]))
   return (
     <div className="settings">
-      <h1>{t("Mods")}</h1>
+      <h1>{t("Play") === "Jogar" ? "Mods" : "Mods"}</h1>
       {error && <p className="op-error">{error}</p>}
       <p className="page-intro">Arquivos sobrepostos ao jogo ao iniciar; os arquivos do jogo nunca mudam.</p>
-      <Section title={t("Mods & patches")}>
+      <Section title={t("Play") === "Jogar" ? "Mods" : "Mods"}>
         <Field label="Carregar mods" hint="Mods de arquivos soltos, cada um em sua pasta com dvdroot_ps4.">
           <Toggle value={state.app.mods_enabled !== false}
             onChange={(v) => run(() => bridge.setApp({ mods_enabled: v }))} label="Carregar mods" />
@@ -378,7 +378,7 @@ export function ModsPage({ state, refresh }: P) {
             <input className="text" placeholder="nome do preset" value={preset} onChange={(e) => setPreset(e.target.value)} />
           </div>
         )}
-        <ActionButton onClick={() => refresh()}>{t("Log")}</ActionButton>
+        <ActionButton onClick={() => refresh()}>{t("Play") === "Jogar" ? "Atualizar" : "Refresh"}</ActionButton>
       </Section>
     </div>
   )
@@ -403,10 +403,10 @@ export function ControlsPage({ state, refresh }: P) {
   const reset = () => save(c.rows.map((r) => ({ ...r, key: r.default_key, pad: r.default_pad })), style)
   return (
     <div className="settings">
-      <h1>{t("Gamepad names")}</h1>
+      <h1>{t("Play") === "Jogar" ? "Controles" : "Controls"}</h1>
       {error && <p className="op-error">{error}</p>}
       <p className="page-intro">Qual tecla ou botão do controle aperta cada botão do jogo.</p>
-      <Section title={t("Gamepad names")}>
+      <Section title={t("Play") === "Jogar" ? "Mapeamento" : "Mapping"}>
         <span className="inline-row">
           {(["playstation", "xbox"] as const).map((s) => (
             <label key={s} className={"radio" + (style === s ? " on" : "")}>
@@ -416,7 +416,7 @@ export function ControlsPage({ state, refresh }: P) {
           ))}
         </span>
       </Section>
-      <Section title={t("Gamepad names")}>
+      <Section title={t("Play") === "Jogar" ? "Mapeamento" : "Mapping"}>
         <div className="controls-table">
           <span className="th">BOTÃO DO JOGO</span><span className="th">TECLADO</span><span className="th">CONTROLE</span>
           {rows.map((r) => (
@@ -465,7 +465,7 @@ export function AdvancedPage({ state, refresh }: P) {
   })
   return (
     <div className="settings">
-      <h1>{t("Advanced")}</h1>
+      <h1>{t("Play") === "Jogar" ? "Avançado" : "Advanced"}</h1>
       {error && <p className="op-error">{error}</p>}
       <Section title={t("Advanced")}>
         <Field label={t("Language")} hint="Aplica-se quando o launcher abrir de novo.">
@@ -535,9 +535,9 @@ export function LogPage(_props: P) {
   useEffect(() => { void load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="settings log-page">
-      <h1>{t("Log")}</h1>
+      <h1>{t("Play") === "Jogar" ? "Registro" : "Log"}</h1>
       <div className="inline-row">
-        <ActionButton onClick={load}>{t("Log")}</ActionButton>
+        <ActionButton onClick={load}>{t("Play") === "Jogar" ? "Atualizar" : "Refresh"}</ActionButton>
         <ActionButton onClick={() => navigator.clipboard?.writeText(text)}>Copiar</ActionButton>
       </div>
       <pre className="log" aria-label="Log de execução">{text || "Sem registros ainda — o log da execução aparece aqui durante e após iniciar o jogo."}</pre>

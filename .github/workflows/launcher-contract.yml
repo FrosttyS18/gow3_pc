@@ -1,0 +1,71 @@
+name: launcher-contract
+
+# Testes antirregressão do launcher cinematográfico (CONTRACT.md).
+# Falha OBJETIVAMENTE quando: páginas somem, duplicam, quebram layout, hooks
+# violados, tela preta, volume errado, música reinicia, navegação falha.
+#
+# Este workflow é proposto para check obrigatório. Sua ativação na proteção da
+# main segue o protocolo de revisão do mantenedor (superfície de segurança).
+
+on:
+  pull_request:
+    paths:
+      - "launcher/cinematic/**"
+      - ".github/workflows/launcher-contract.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: launcher contract tests
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: pip install websocket-client
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build frontend
+        working-directory: launcher/cinematic
+        run: |
+          npm install
+          npm run build
+
+      - name: Build Tauri (test binary)
+        working-directory: launcher/cinematic
+        shell: bash
+        run: npx tauri build --no-bundle
+        env:
+          CARGO_INCREMENTAL: '0'
+
+      - name: Run launcher contract tests
+        working-directory: launcher/cinematic
+        shell: pwsh
+        run: |
+          $env:PYTHONIOENCODING='utf-8'
+          python tests/test_ui.py 2>&1 | Tee-Object -FilePath contract-results.txt
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content contract-results.txt | Write-Host
+            exit 1
+          }
+
+      - name: Upload results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: contract-test-results
+          path: launcher/cinematic/contract-results.txt

@@ -32,7 +32,6 @@ export default function App() {
   useEffect(() => { if (state) setMusicMuted(state.music.muted) }, [state?.music.muted]) // eslint-disable-line react-hooks/exhaustive-deps
   useAmbientMusic(state?.music, musicMuted, phase)
 
-  // i18n: troca IMEDIATA (sem reiniciar); a ponte grava só quando o usuário muda
   const setLanguage = useCallback((next: string) => {
     setLanguageState(next)
     bridge.setApp({ ui_language: next }).catch((e) => console.error("ui_language", e))
@@ -47,7 +46,6 @@ export default function App() {
     }
   }, [language, state?.translations, setLanguage])
 
-  // Poll do processo pelo CÓDIGO DE SAÍDA REAL
   useEffect(() => {
     if (phase !== "preparing" && phase !== "running") return
     let failures = 0
@@ -63,9 +61,9 @@ export default function App() {
         } else {
           if (status.outcome === "error") {
             setPhase("error")
-            setPlayError((status.last_line || "o jogo terminou com erro")
-              + (status.exit_code !== null ? ` (código ${status.exit_code})` : "")
-              + " — detalhes no Registro")
+            setPlayError((status.last_line || "the game ended with an error")
+              + (status.exit_code !== null ? ` (code ${status.exit_code})` : "")
+              + " — see the Log")
             window.dispatchEvent(new CustomEvent("gow3:restore-music"))
           } else {
             setPhase("idle")
@@ -82,14 +80,13 @@ export default function App() {
       } catch (e) {
         failures += 1
         if (failures >= 3) {
-          setBridgeError("Falha ao acompanhar o jogo: " + String((e as Error).message ?? e))
+          setBridgeError("Failed to track the game: " + String((e as Error).message ?? e))
         }
       }
     }, 1500)
     return () => clearInterval(timer)
   }, [phase, refresh])
 
-  // Música é uma AÇÃO do menu
   const toggleMusic = () => {
     const next = !musicMuted
     setMusicMuted(next)
@@ -101,7 +98,6 @@ export default function App() {
     setPlayError("")
     setPhase("preparing")
     startedAt.current = Date.now()
-    // P0 M1.7: a música PARA ANTES de qualquer operação da ponte — determinístico
     window.dispatchEvent(new CustomEvent("gow3:stop-music"))
     try {
       await bridge.play()
@@ -155,7 +151,14 @@ export default function App() {
             />
           </>
         )}
-        {active && state && <div className="page-host">{active.component({ state, refresh })}</div>}
+        {active && state && (
+          <div className="page-host">
+            {(() => {
+              const Page = active.component
+              return <Page state={state} refresh={refresh} />
+            })()}
+          </div>
+        )}
       </div>
     </I18nContext.Provider>
   )
