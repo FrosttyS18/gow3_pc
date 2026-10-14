@@ -97,16 +97,26 @@ pode sobrepor este contrato sem decisão explícita do mantenedor.**
 - Launcher morto (X, Alt+F4, taskkill, crash) = árvore morta pelo kernel.
 - `close_on_play`: OCULTA a janela (não fecha — Job mataria o jogo); sai ao fim.
 
-## 9. REGRA DE UPSTREAM
+## 9. REGRA DE UPSTREAM (PERMANENTE — decisão do mantenedor 2026-10-14)
 
 **ATUALIZAÇÃO DO MOTOR NÃO É REDESIGN DO LAUNCHER.**
-- Upstream traz: engine, patches, correções, compatibilidade, novas funções do backend.
-- Upstream NUNCA traz: layout, navegação, organização de páginas, componentes visuais.
-- Se o upstream juntar páginas, o cinematográfico MANTÉM as suas.
-- Se o upstream remover funcionalidades, investigar compatibilidade antes de esconder.
-- Se o upstream adicionar opções relevantes, planejar apresentação no design system.
+
+O projeto acompanha as atualizações técnicas estáveis de FelipePrado0/gow3_pc.
+
+**Upstream FORNECE:** motor, runtime, scripts, patches, correções, compatibilidade e novas funcionalidades.
+**Upstream NUNCA FORNECE:** layout, navegação, organização de páginas ou componentes visuais do launcher.
+
+- Ao integrar: preservar integralmente o design e a navegação; adaptar somente as integrações.
+- Não copiar o layout do Tkinter nem manter controles para funções que o upstream desativou.
+- Validações automatizadas priorizam comportamento técnico e integridade dos dados.
+- O mantenedor faz o aceite visual e os testes de interação manual.
+- Integração em branch isolada com o protocolo de auditoria existente (exceção blob-provada + APPROVED_UPSTREAM na main).
 - PRs de upstream que tocarem `launcher/cinematic/**` devem ser BLOQUEADOS e exigir
   justificativa + aprovação visual específica do mantenedor.
+- Nenhuma substituição de UI, nenhum bypass, nenhum merge automático.
+
+**Próxima versão técnica:** windows-v2.2.0, commit af5930a0e3bb6bd257563d0bfd6fa09210a78310.
+**Prioridades:** compatibilidade, novas funcionalidades, gravação segura de configurações, patches obrigatórios, inicialização do jogo e gerenciamento de processos.
 
 ## 10. TESTES ANTIRREGRESSÃO
 
