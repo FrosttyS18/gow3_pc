@@ -191,3 +191,35 @@ export async function pickFolderAndSet(key: string, refresh: () => void) {
     await (await import("../bridge")).bridge.setApp({ [key]: path }).then(refresh)
   }
 }
+
+/* ============================== SLIDER (design system) ==============================
+ * Trilha vermelha (--figma-red/#9F0000), thumb #9F0000 com aro branco (tokens dos
+ * sliders aprovados). O valor é exibido AO VIVO durante a interação (estado local)
+ * e persiste SOMENTE em interação consolidada (soltar o mouse / tecla / blur) —
+ * nunca a cada movimento, para não gravar gow3.ini em rajada. Teclado nativo do
+ * input range (setas/home/end) com aria-label; o valor tem aria-live.
+ */
+export function Slider({ value, min, max, step = 1, onCommit, label, format }: {
+  value: number
+  min: number
+  max: number
+  step?: number
+  onCommit: (next: number) => void
+  label: string
+  format?: (v: number) => string
+}) {
+  const [drag, setDrag] = useState(value)
+  useEffect(() => setDrag(value), [value])
+  const commit = () => { if (drag !== value) onCommit(drag) }
+  return (
+    <span className="slider-row">
+      <input type="range" className="slider" min={min} max={max} step={step} value={drag}
+        aria-label={label}
+        onChange={(e) => setDrag(Number(e.target.value))}
+        onPointerUp={commit} onKeyUp={commit} onBlur={commit} />
+      <span className="slider-value" aria-live="polite">
+        {format ? format(drag) : String(drag)}
+      </span>
+    </span>
+  )
+}

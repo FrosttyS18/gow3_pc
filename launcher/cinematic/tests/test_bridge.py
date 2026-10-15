@@ -367,6 +367,42 @@ class UpstreamV230Tests(BridgeFixture):
         self.assertEqual(done.stdout.strip(), "0",
                          "Discord RPC deve permanecer desativado (GOW3_DISCORD=0)")
 
+    def test_discord_off_even_with_legacy_true_setting(self):
+        """NEGATIVO (auditoria): settings.json legado com discord_rpc=true NÃO pode
+        vazar para o jogo — prepare_play força GOW3_DISCORD='0' no ambiente de TODA
+        partida; a preferência persistida NÃO é apagada nem reescrita."""
+        # 1) persiste a preferência legada "ligada" (como um settings antigo traria)
+        (self.appdata / "gow3-launcher").mkdir(parents=True, exist_ok=True)
+        (self.appdata / "gow3-launcher" / "settings.json").write_text(
+            json.dumps({"discord_rpc": True}), encoding="utf-8")
+        # 2) o backend OFICIAL ativaria (comportamento upstream preservado)…
+        code = ("import sys; sys.path.insert(0, {dir!r});\n"
+                "import gow3_launcher_win as L\n"
+                "env = L.game_environment({{**L.APP_DEFAULTS, 'discord_rpc': True,"
+                " 'game_dir': '', 'user_dir': ''}})\n"
+                "print(env.get('GOW3_DISCORD'))")
+        done = subprocess.run([sys.executable, "-c", code.format(dir=str(LAUNCHER_DIR))],
+                              capture_output=True, text=True, env=self.env, timeout=90)
+        self.assertEqual(done.returncode, 0, done.stderr[-300:])
+        self.assertEqual(done.stdout.strip(), "1",
+                         "pré-condição: o backend oficial liga quando a chave está true")
+        # 3) …mas a ESPECIFICAÇÃO que o launcher cinematográfico entrega ao Rust
+        #    força '0' em TODA partida
+        env = {**self.env, "GOW3_CINEMATIC_SKIP_GAME_CHECK": "1",
+               "GOW3_CINEMATIC_RUN_CMD": json.dumps([sys.executable, "-c", "pass"])}
+        done = subprocess.run([sys.executable, str(BRIDGE)],
+                              input=json.dumps({"cmd": "prepare_play"}).encode("utf-8"),
+                              capture_output=True, env=env, cwd=str(LAUNCHER_DIR), timeout=90)
+        spec = json.loads(done.stdout.decode("utf-8"))
+        self.assertTrue(spec.get("ok"), spec)
+        self.assertEqual(spec["env"].get("GOW3_DISCORD"), "0",
+                         "prepare_play deve forçar GOW3_DISCORD=0 mesmo com legacy true")
+        # 4) a preferência persistida continua INTACTA (não apagamos nada)
+        saved = json.loads((self.appdata / "gow3-launcher" / "settings.json")
+                           .read_text(encoding="utf-8"))
+        self.assertIs(saved.get("discord_rpc"), True,
+                      "a preferência existente não deve ser reescrita")
+
     def test_version_230_and_legacy_keys_preserved(self):
         _, state = self.bridge({"cmd": "state"})
         self.assertEqual(state["version"], "2.3.0")

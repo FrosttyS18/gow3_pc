@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { BridgeState, bridge } from "../bridge"
 import { useI18n } from "../i18n"
-import { ActionButton, Dropdown, Field, PathField, Section, Toggle, pickFolderAndSet, useSaver } from "./inputs"
+import { ActionButton, Dropdown, Field, PathField, Section, Slider, Toggle, pickFolderAndSet, useSaver } from "./inputs"
 
 type P = { state: BridgeState; refresh: () => void }
 
@@ -387,10 +387,10 @@ export function ControlsPage({ state, refresh }: P) {
                hint={t("Play") === "Jogar"
                  ? "Intensidade da vibração do controle; 0% desliga."
                  : "Strength of the gamepad's vibration; 0% turns it off."}>
-          <input type="range" min={0} max={100} step={5} value={Number(state.ini.vibration ?? "100")}
-            onChange={(e) => run(() => bridge.setIni({ vibration: e.target.value }))}
-            aria-label={t("Play") === "Jogar" ? "Vibração do controle" : "Gamepad vibration"} />
-          <span className="version">{state.ini.vibration ?? "100"}%</span>
+          <Slider value={Number(state.ini.vibration ?? "100")} min={0} max={100} step={1}
+            label={t("Play") === "Jogar" ? "Vibração do controle" : "Gamepad vibration"}
+            format={(v) => `${v}%`}
+            onCommit={(v) => run(() => bridge.setIni({ vibration: String(v) }))} />
         </Field>
       </Section>
       <Section title={t("Play") === "Jogar" ? "Mapeamento" : "Mapping"}>
