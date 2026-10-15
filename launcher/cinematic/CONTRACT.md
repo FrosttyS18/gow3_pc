@@ -73,9 +73,19 @@ pode sobrepor este contrato sem decisão explícita do mantenedor.**
 
 ### JOGAR
 - Validações do Tkinter (arquivos, atualização, Sc0, probe) com mensagens pt-BR.
-- Monitor com exit code REAL; spawn falho = 127.
-- Estados: disponível/preparando/executando/erro (com código + última linha do log).
-- Supervisão: Windows Job Object KILL_ON_JOB_CLOSE (launcher morto = árvore morta).
+- **Sessão orientada a eventos (hotfix P0)**: a ponte só devolve a ESPECIFICAÇÃO
+  (prepare_play: comando/cwd/env/arquivos de ciclo); o RUST inicia o processo
+  (stdout/stderr direto no log) e vigia por Job Object de SESSÃO + porta de conclusão —
+  o kernel anuncia ACTIVE_PROCESS_ZERO quando o ÚLTIMO processo da árvore morre
+  (cobre os reinícios internos run.py --after) → UM evento `gow3://game-end` atualiza
+  o launcher. **ZERO polling e ZERO processos Python enquanto o jogo roda.**
+- Erros de spawn chegam direto do Rust ao frontend (sem "127" de monitor).
+- Estados: disponível/preparando/executando/erro (código + última linha do log);
+  preparando→executando é timer LOCAL (6 s), sem consultas.
+- Supervisão: Windows Job Object KILL_ON_JOB_CLOSE (launcher morto = árvore morta) —
+  o launcher tenta se AUTO-ASSOCIAR ao próprio Job ao subir (herança imediata para
+  todo processo criado pelo Rust); se o shell já impõe outro Job, vale a adesão
+  explícita por filho logo após o spawn.
 
 ### Home
 - LIMPA: só arte, logo, menu, JOGAR, rodapé, controles de janela e Música no menu.
@@ -104,11 +114,16 @@ pode sobrepor este contrato sem decisão explícita do mantenedor.**
 
 ## 8. SUPERVISÃO DE PROCESSOS
 
-- Job Object KILL_ON_JOB_CLOSE vitalício do processo Tauri.
-- Cada ponte Python associada ao Job ANTES do pedido chegar ao stdin.
-- Monitor → run.py → gow3-probe → TODOS os filhos herdam o Job.
-- Launcher morto (X, Alt+F4, taskkill, crash) = árvore morta pelo kernel.
-- `close_on_play`: OCULTA a janela (não fecha — Job mataria o jogo); sai ao fim.
+- Job Object KILL_ON_JOB_CLOSE vitalício do processo Tauri (com auto-adesão do próprio
+  launcher quando o shell permite — filhos do Rust nascem no Job por herança).
+- **Ponte persistente (hotfix P0)**: UM worker Python por launcher atende todas as
+  operações (envelopes seq/req, uma por vez — escritas nunca correm entre si),
+  associado ao Job antes do primeiro pedido, ocioso quando sem trabalho, com
+  recuperação limitada (2 renascimentos/min; depois recusa até reiniciar o launcher).
+  Nenhum processo novo por clique; nenhum console (CREATE_NO_WINDOW).
+- Sessão do jogo: Job de SESSÃO próprio + porta de conclusão (IOCP) —
+  ACTIVE_PROCESS_ZERO = fim real da sessão (reinícios internos incluídos);
+  `close_on_play`: OCULTA a janela (não fecha — Job mataria o jogo); sai ao fim.
 
 ## 9. REGRA DE UPSTREAM (PERMANENTE — decisão do mantenedor 2026-10-14)
 
