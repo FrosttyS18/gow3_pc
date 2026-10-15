@@ -201,6 +201,27 @@ def run_tests(cdp):
         check(f"página {pid} não está vazia", len(text.strip()) > 20)
         go_home(cdp)
 
+    # ===== v2.2.0: adaptações da sincronização técnica upstream =====
+    print("\n== v2.2.0 (glyph_style, upscaling estacionado, FSR 1/RCAS fora da UI) ==")
+    display_text = open_page(cdp, 0) or ""
+    check("Tela NÃO oferece FSR 1 (removido do motor v2.2.0)",
+          "fsr 1" not in display_text.lower(), display_text[:120])
+    check("Tela NÃO oferece RCAS (fora do contrato v2.2.0)",
+          "rcas" not in display_text.lower(), display_text[:120])
+    go_home(cdp)
+    graphics_text = open_page(cdp, 1) or ""
+    check("Gráficos informa upscaling estacionado",
+          "estacionado" in graphics_text.lower(), graphics_text[:120])
+    check("Gráficos NÃO oferece controles funcionais de upscaling",
+          "preset de qualidade" not in graphics_text.lower()
+          and "resolução de saída" not in graphics_text.lower()
+          and "nitidez do upscaler" not in graphics_text.lower(), graphics_text[:160])
+    go_home(cdp)
+    controls_text = open_page(cdp, 6) or ""
+    check("Controles oferece Ícones de botões no jogo (glyph_style)",
+          "ícones de botões no jogo" in controls_text.lower(), controls_text[:120])
+    go_home(cdp)
+
     # ===== 2. HOOKS, CONSOLE E EXCEÇÕES (FALHA C) =====
     print("\n== HOOKS, CONSOLE E EXCEÇÕES ==")
     # navegar por TODAS as páginas primeiro

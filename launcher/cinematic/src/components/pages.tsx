@@ -29,21 +29,6 @@ export function DisplayPage({ state, refresh }: P) {
           <Toggle value={!!app.hdr} onChange={(v) => setApp("hdr", v)} label={t("Play") === "Jogar" ? "Permitir saída HDR" : "Allow HDR output"} />
         </Field>
       </Section>
-      <Section title={t("Play") === "Jogar" ? "Escala e nitidez" : "Scaling & sharpening"}>
-        <Field label={t("Play") === "Jogar" ? "Ampliar com FSR 1" : "Upscale with FSR 1"}
-               hint="Amplia uma imagem menor do jogo para a janela; com resolução 720p aumenta os FPS.">
-          <Toggle value={ini.fsr1 === "1"} onChange={(v) => setIni("fsr1", v)} label={t("Play") === "Jogar" ? "Ampliar com FSR 1" : "Upscale with FSR 1"} />
-        </Field>
-        <Field label={t("Play") === "Jogar" ? "Nitidez da tela (RCAS)" : "Screen sharpening (RCAS)"}
-               hint="Afiará a imagem final; com o upscaler ligado use a nitidez dele (Gráficos) — uma anula a outra.">
-          <Toggle value={ini.rcas === "1"} onChange={(v) => setIni("rcas", v)} label={t("Play") === "Jogar" ? "Nitidez da tela (RCAS)" : "Screen sharpening (RCAS)"} />
-        </Field>
-        <Field label={t("Play") === "Jogar" ? "Intensidade da nitidez" : "Sharpening strength"}>
-          <input type="range" min={0} max={100} value={Number(ini.rcas_strength ?? 75)}
-            onChange={(e) => setIni("rcas_strength", e.target.value)}
-            aria-label={t("Play") === "Jogar" ? "Intensidade da nitidez" : "Sharpening strength"} />
-        </Field>
-      </Section>
       <Section title={t("Play") === "Jogar" ? "Sobreposição" : "Overlay"}>
         <Field label={t("Play") === "Jogar" ? "Mostrar sobreposição de desempenho" : "Show performance overlay"}
                hint="Itens, tamanho e canto: menu do jogo (Insert / R3+L2) › Sobreposição.">
@@ -55,62 +40,22 @@ export function DisplayPage({ state, refresh }: P) {
   )
 }
 
-/* ---------- Gráficos experimentais (build_graphics) ---------- */
-export function GraphicsPage({ state, refresh }: P) {
+/* ---------- Gráficos experimentais (build_graphics) — upscaling temporal estacionado pela v2.2.0 do motor ---------- */
+export function GraphicsPage({ state }: P) {
   const { t } = useI18n()
-  const { run, error } = useSaver(refresh)
-  const ini = state.ini
-  const setIni = (k: string, v: string | boolean) => run(() => bridge.setIni({ [k]: v }))
-  const setApp = (k: string, v: boolean) => run(() => bridge.setApp({ [k]: v }))
   return (
     <div className="settings">
       <h1>{t("Play") === "Jogar" ? "Gráficos" : "Graphics"}</h1>
-      {error && <p className="op-error">{error}</p>}
-      <Section title={t("Play") === "Jogar" ? "Upscaling" : "Upscaling"}>
-        <Field label="Ativar o upscaler (experimental)" restart
-               hint="Desligado (padrão): o jogo roda sem upscaling temporal. Estes upscalers ainda não estão calibrados para este jogo: espere ghosting ou cintilação. FSR 3.1 não exige mais nada; FSR 4 precisa dos arquivos abaixo.">
-          <Toggle value={!!state.app.experimental_upscaler}
-            onChange={(v) => setApp("experimental_upscaler", v)} label="Ativar o upscaler" />
-        </Field>
-      </Section>
-      <Section title={t("Play") === "Jogar" ? "Upscaling" : "Upscaling"}>
-        <Field label="Upscaler"
-               hint="Upscaling temporal com os vetores de movimento do próprio jogo. FSR 4 exige GPU com INT8; sem isso o jogo volta ao FSR 3.1 sozinho.">
-          <Dropdown value={ini.upscaler ?? "fsr4"} choices={state.choices.upscaler}
-            onChange={(v) => setIni("upscaler", v)} label="Upscaler" />
-        </Field>
-        <Field label="Preset de qualidade" hint="Escala de render por eixo: Qualidade desenha em 1/1,5 do tamanho de saída.">
-          <Dropdown value={ini.preset ?? "1"} choices={state.choices.preset}
-            onChange={(v) => setIni("preset", v)} label="Preset" />
-        </Field>
-        <Field label="Resolução de saída" hint="O que o upscaler entrega; a interface do jogo é desenhada nesse tamanho.">
-          <Dropdown value={ini.output_res ?? "1920x1080"} choices={state.choices.output_res}
-            onChange={(v) => setIni("output_res", v)} label="Resolução de saída" />
-        </Field>
-        <Field label="Troca de resolução ao vivo"
-               hint="Desligado: saídas diferentes de 1080p entram por patch ao iniciar (mais rápido). Ligado: muda no jogo sem reiniciar, com um custo.">
-          <Dropdown value={ini.live_resolution ?? "auto"} choices={state.choices.live_resolution}
-            onChange={(v) => setIni("live_resolution", v)} label="Troca de resolução ao vivo" />
-        </Field>
-        <Field label="Nitidez do upscaler (RCAS)"
-               hint="A nitidez do próprio upscaler; com ele ligado, esta e a da tela se alternam.">
-          <Toggle value={ini.sharpen === "1"} onChange={(v) => setIni("sharpen", v)} label="Nitidez do upscaler" />
-        </Field>
-        <Field label="Força da nitidez">
-          <input type="range" min={0} max={2} step={0.05} value={Number(ini.sharpness ?? 0.5)}
-            onChange={(e) => setIni("sharpness", e.target.value)} aria-label="Força da nitidez" />
-        </Field>
-        <Field label="Vetores de movimento de objetos"
-               hint="Menos ghosting em personagens e roupas; custa cerca de 10% de FPS.">
-          <Toggle value={ini.object_motion === "1"} onChange={(v) => setIni("object_motion", v)}
-            label="Vetores de movimento" />
-        </Field>
-      </Section>
-      <Section title="Arquivos do FSR 4">
+      <Section title={t("Play") === "Jogar" ? "Upscaling (estacionado)" : "Upscaling (parked)"}>
+        <p className="page-intro">
+          O upscaling temporal (FSR 3.1, TAA) foi estacionado pelo motor na versão 2.2.0: ainda não está
+          calibrado para este jogo e permanece desligado em toda partida. Não há o que configurar aqui
+          enquanto o recurso não voltar.
+        </p>
         <p className="field-hint">
-          {state.fsr4.missing === 0
-            ? `Instalados: ${state.fsr4.installed} arquivos.`
-            : `Faltam ${state.fsr4.missing} de ${state.fsr4.total} arquivos em ${state.fsr4.folder}.`}
+          A preferência salva antes da 2.2.0 (upscaler {state.ini.upscaler ?? "—"}) é preservada no
+          gow3.ini e voltará a valer automaticamente se o motor reativar o recurso. Nada é regravado
+          pelo launcher.
         </p>
       </Section>
     </div>
@@ -416,6 +361,12 @@ export function ControlsPage({ state, refresh }: P) {
             </label>
           ))}
         </span>
+        <Field label={t("Play") === "Jogar" ? "Ícones de botões no jogo" : "In-game button icons"}
+               hint="Substitui os ícones de botão de PlayStation dentro do jogo pelos do seu controle. Funciona numa cópia de dois arquivos do jogo (cerca de 70 MB) na pasta de dados do port — a pasta do jogo nunca é alterada. Aplicado ao iniciar o jogo.">
+          <Dropdown value={String(state.app.glyph_style ?? "off")} choices={state.choices.glyph_style ?? []}
+            onChange={(v) => run(() => bridge.setApp({ glyph_style: v }))}
+            label={t("Play") === "Jogar" ? "Ícones de botões no jogo" : "In-game button icons"} />
+        </Field>
       </Section>
       <Section title={t("Play") === "Jogar" ? "Mapeamento" : "Mapping"}>
         <div className="controls-table">
