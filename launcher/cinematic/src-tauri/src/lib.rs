@@ -475,6 +475,9 @@ fn create_session_objects() -> Result<(windows_sys::Win32::Foundation::HANDLE,
             windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE,
             std::ptr::null_mut(), 0, 1);
         if port.is_null() {
+            // caminho excepcional: a porta morreu DEPOIS do Job — o handle do Job
+            // não pode vazar; fecha antes de devolver o erro.
+            windows_sys::Win32::Foundation::CloseHandle(job);
             return Err("CreateIoCompletionPort falhou".into());
         }
         Ok((job, port))
@@ -488,7 +491,7 @@ fn associate_port(job: windows_sys::Win32::Foundation::HANDLE,
     unsafe {
         let mut assoc: windows_sys::Win32::System::JobObjects::
             JOBOBJECT_ASSOCIATE_COMPLETION_PORT = std::mem::zeroed();
-        assoc.CompletionKey = job as *mut core::ffi::c_void;
+        assoc.CompletionKey = job;
         assoc.CompletionPort = port;
         let ok = windows_sys::Win32::System::JobObjects::SetInformationJobObject(
             job,
@@ -551,10 +554,15 @@ fn quote_arg(arg: &str) -> String {
     out
 }
 
-/// Bloco de ambiente UNICODE ("K=V\0...\0\0") para CreateProcessW.
+/// Bloco de ambiente UNICODE para CreateProcessW, na forma exigida pelo Windows:
+/// entradas "K=V" terminadas em NUL, bloco terminado em NUL duplo, ORDENADAS
+/// alfabeticamente em ordem case-insensitive (a variante Unicode exige a
+/// ordenação; valores preservados byte a byte, como o backend oficial os produziu).
 fn environment_block(envs: &HashMap<String, String>) -> Vec<u16> {
+    let mut entries: Vec<(&String, &String)> = envs.iter().collect();
+    entries.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
     let mut block: Vec<u16> = Vec::new();
-    for (key, value) in envs {
+    for (key, value) in entries {
         let entry = format!("{key}={value}\0");
         block.extend(entry.encode_utf16());
     }
@@ -632,12 +640,16 @@ fn spawn_game_session_inner(command: &[String], cwd: &str, envs: &HashMap<String
             windows_sys::Win32::Foundation::CloseHandle(session_job);
             message
         };
-        if windows_sys::Win32::System::JobObjects::AssignProcessToJobObject(
-            session_job, info.hProcess) == 0 {
-            return Err(fail("associação ao Job de sessão falhou".into(), &info));
-        }
-        // Job principal: só adesão explícita quando o launcher NÃO se auto-associou
-        // (se auto-associou, o filho SUSPENSO já herdou o Job por criação — sem corrida).
+        // HIERARQUIA DE JOBS ANINHADOS (docs Microsoft "Nested Jobs"): a adesão
+        // MAIS ANTIGA vira o ANCESTRAL — logo o Job PRINCIPAL (pai) precisa vir
+        // ANTES do Job de SESSÃO (filho) em TODOS os cenários, para que o
+        // KILL_ON_JOB_CLOSE do principal alcance toda a árvore, inclusive a
+        // sessão. Os dois caminhos garantem isso com o processo AINDA SUSPENSO:
+        //  (a) launcher auto-associado ao próprio Job → o filho HERDA o principal
+        //      na própria criação (adesão mais antiga possível), e o de sessão é
+        //      atribuído agora, como filho dele;
+        //  (b) launcher preso ao Job de outro aplicativo (auto-adesão impossível)
+        //      → adesão EXPLÍCITA ao principal AQUI, e só DEPOIS ao de sessão.
         if !job_self_assigned() {
             let main_job = match job_handle() {
                 Ok(handle) => handle,
@@ -647,6 +659,10 @@ fn spawn_game_session_inner(command: &[String], cwd: &str, envs: &HashMap<String
                 main_job, info.hProcess) == 0 {
                 return Err(fail("associação ao Job principal falhou".into(), &info));
             }
+        }
+        if windows_sys::Win32::System::JobObjects::AssignProcessToJobObject(
+            session_job, info.hProcess) == 0 {
+            return Err(fail("associação ao Job de sessão falhou".into(), &info));
         }
         if associate {
             if let Err(error) = associate_port(session_job, port) {
@@ -1238,7 +1254,7 @@ mod p0_tests {
         let root_pid = session.pid;
         let watcher = std::thread::spawn(move || wait_session_end(session));
         let mut child_pid: u32 = 0;
-        for _ in range0(100) {
+        for _ in 0..100 {
             std::thread::sleep(Duration::from_millis(50));
             if let Ok(text) = fs::read_to_string(&out) {
                 if let Ok(parsed) = text.trim().parse::<u32>() { child_pid = parsed; break; }
@@ -1253,8 +1269,37 @@ mod p0_tests {
         let code = watcher.join().expect("vigília");
         assert_eq!(code, 0);
     }
-}
 
-/// range0: helper minúsculo (0..n) usado apenas nos testes.
-#[cfg(test)]
-fn range0(n: usize) -> std::ops::Range<usize> { 0..n }
+    /// Bloco de ambiente: ordenação alfabética case-insensitive (exigência da
+    /// variante Unicode do CreateProcessW), valores intactos, NUL duplo final.
+    #[test]
+    fn environment_block_sorted_case_insensitive_with_double_nul() {
+        let mut envs = HashMap::new();
+        envs.insert("ZEBRA".to_string(), "1".to_string());
+        envs.insert("alpha".to_string(), "valor com = sinal e espaços".to_string());
+        envs.insert("BETA".to_string(), "üñïçødé ✓".to_string());
+        envs.insert("__altra".to_string(), "x".to_string());
+        let block = environment_block(&envs);
+        let mut parts: Vec<String> = Vec::new();
+        let mut current = String::new();
+        for unit in &block[..block.len() - 1] { // ignora o NUL final do bloco
+            if *unit == 0 {
+                parts.push(current.clone());
+                current.clear();
+            } else {
+                current.push(char::from_u32(*unit as u32).unwrap_or('?'));
+            }
+        }
+        assert_eq!(parts.len(), 4, "quatro entradas: {parts:?}");
+        let lower: Vec<String> = parts.iter()
+            .map(|p| p.split('=').next().unwrap_or("").to_lowercase()).collect();
+        let mut sorted = lower.clone();
+        sorted.sort();
+        assert_eq!(lower, sorted, "chaves em ordem alfabética case-insensitive: {parts:?}");
+        assert!(parts.iter().any(|p| p == "BETA=üñïçødé ✓"), "valor Unicode intacto");
+        assert!(parts.iter().any(|p| p.contains("valor com = sinal e espaços")),
+                "valor com '=' e espaços intacto");
+        assert_eq!(*block.last().unwrap(), 0, "bloco termina em NUL duplo");
+        assert_eq!(block[block.len() - 2], 0, "a última entrada também termina em NUL");
+    }
+}
