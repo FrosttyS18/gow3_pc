@@ -137,10 +137,10 @@ export const bridge = {
    * nenhum processo novo por clique, nenhum polling durante o jogo. */
   play: () => {
     const tauri = (window as unknown as {
-      __TAURI__?: { invoke: (cmd: string) => Promise<{ ok: boolean; pid: number; log: string }> }
+      __TAURI__?: { core: { invoke: (cmd: string) => Promise<{ ok: boolean; pid: number; log: string }> } }
     }).__TAURI__
     if (!tauri) throw new Error("fora do app Tauri")
-    return tauri.invoke("game_start")
+    return tauri.core.invoke("game_start")
   },
   playStatus: () => call<PlayStatus>({ cmd: "play_status" }),
   pickFolder: () => window.__GOW3_PICK_FOLDER__?.() ?? Promise.resolve(null),
