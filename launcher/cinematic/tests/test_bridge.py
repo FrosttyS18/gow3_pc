@@ -279,5 +279,88 @@ class ResolvePathTests(BridgeFixture):
                          f"deveria ser exatamente DATA_DIR/user, veio: {path}")
 
 
+class UpstreamV220Tests(BridgeFixture):
+    """Adaptações da sincronização windows-v2.2.0: gravação cirúrgica do gow3.ini
+    (preserva alterações feitas DENTRO do jogo e chaves legadas fora do contrato),
+    glyph_style (ícones de botões in-game), upscaling temporal estacionado, patch
+    Startup Black Screen obrigatório e remoção do FSR 4."""
+
+    def test_set_ini_only_requested_key_preserves_in_game_and_legacy(self):
+        """Mudar UMA chave não pode regravar as outras: valor alterado dentro do jogo
+        (show_fps=0) e chaves legadas removidas do contrato v2.2.0 (fsr1/rcas/sharpen)
+        precisam sobreviver byte a byte."""
+        (self.data / "gow3.ini").write_text(
+            "# fixture: comments must survive\nvsync=0\nshow_fps=0\n"
+            "fsr1=1\nrcas=0\nrcas_strength=40\nsharpen=1\nsharpness=0.30\n"
+            "# a key the launcher does not manage\ncustom_key=keepme\n", encoding="utf-8")
+        _, response = self.bridge({"cmd": "set_ini", "values": {"vsync": True}})
+        self.assertTrue(response["ok"])
+        text = (self.data / "gow3.ini").read_text(encoding="utf-8")
+        self.assertIn("vsync=1", text)
+        self.assertIn("show_fps=0", text)          # alteração in-game preservada
+        self.assertIn("fsr1=1", text)              # legado preservado (fora do contrato v2.2.0)
+        self.assertIn("rcas=0", text)
+        self.assertIn("rcas_strength=40", text)
+        self.assertIn("sharpen=1", text)
+        self.assertIn("sharpness=0.30", text)
+        self.assertIn("custom_key=keepme", text)
+        self.assertIn("# fixture: comments must survive", text)
+        self.assertNotIn("fsr1=0", text)
+
+    def test_set_ini_rejects_legacy_keys_removed_from_contract(self):
+        """fsr1/rcas/sharpen saíram do contrato do port na v2.2.0: a ponte recusa
+        gravá-los (o launcher nunca mais os reescreve)."""
+        for key in ("fsr1", "rcas", "rcas_strength", "sharpen", "sharpness"):
+            _, response = self.bridge({"cmd": "set_ini", "values": {key: "1"}})
+            self.assertIn("error", response, f"{key} deveria ser recusado")
+
+    def test_glyph_style_choices_and_persistence(self):
+        _, state = self.bridge({"cmd": "state"})
+        values = [c["value"] for c in state["choices"]["glyph_style"]]
+        self.assertEqual(values, ["off", "auto", "xbox", "nintendo"])
+        _, response = self.bridge({"cmd": "set_app", "values": {"glyph_style": "xbox"}})
+        self.assertTrue(response["ok"])
+        saved = json.loads((self.appdata / "gow3-launcher" / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved["glyph_style"], "xbox")
+        _, state = self.bridge({"cmd": "state"})
+        self.assertEqual(state["app"]["glyph_style"], "xbox")
+
+    def test_glyph_style_and_parked_upscaler_in_game_environment(self):
+        """game_environment (mesma função que o play usa) deve exportar
+        GOW3_GLYPH_STYLE=xbox e manter o upscaler temporal estacionado (=0)."""
+        code = ("import sys; sys.path.insert(0, {dir!r});\n"
+                "import gow3_launcher_win as L\n"
+                "s = {{**L.APP_DEFAULTS, 'game_dir': '', 'user_dir': '', 'glyph_style': 'xbox'}}\n"
+                "env = L.game_environment(s)\n"
+                "print(env.get('GOW3_GLYPH_STYLE'), env.get('GOW3_EXPERIMENTAL_UPSCALER'))")
+        done = subprocess.run([sys.executable, "-c", code.format(dir=str(LAUNCHER_DIR))],
+                              capture_output=True, text=True, env=self.env, timeout=90)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        glyph, parked = done.stdout.split()
+        self.assertEqual(glyph, "xbox")
+        self.assertEqual(parked, "0")
+
+    def test_startup_black_screen_patch_forced_with_old_saved_list(self):
+        """ALWAYS_ON: com uma lista salva ANTIGA (sem o fix), selected_patches(only=True)
+        do scripts/patches.py ainda o inclui — a correção é obrigatória."""
+        xml = LAUNCHER_DIR.parents[0] / "patches" / "God_of_War_III_Remastered.xml"
+        code = ("import sys; sys.path.insert(0, {dir!r});\n"
+                "import patches as P\n"
+                "names = P.selected_patches({xml!r}, '01.02', '', only=True)\n"
+                "print('Bug Fix - Startup Black Screen' in names)")
+        done = subprocess.run([sys.executable, "-c", code.format(
+            dir=str(LAUNCHER_DIR.parents[0] / "scripts"), xml=str(xml))],
+                              capture_output=True, text=True, env=self.env, timeout=90)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertIn("True", done.stdout)
+
+    def test_upscaler_choices_v220_and_fsr4_removed(self):
+        _, state = self.bridge({"cmd": "state"})
+        self.assertEqual([c["value"] for c in state["choices"]["upscaler"]],
+                         ["fsr3", "taa", "off"])
+        self.assertNotIn("fsr4", state, "fsr4 foi removido do upstream v2.2.0")
+        self.assertNotIn("dlss", [c["value"] for c in state["choices"]["upscaler"]])
+
+
 if __name__ == "__main__":
     unittest.main()

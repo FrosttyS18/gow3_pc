@@ -66,7 +66,6 @@ export interface BridgeState {
   mods: ModsState
   backups: { keep: number; names: string[] }
   controls: ControlsState
-  fsr4: { installed: number; total: number; missing: number; folder: string }
   running: boolean
   translations: Record<string, Record<string, string>>
 }

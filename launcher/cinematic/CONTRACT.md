@@ -17,7 +17,7 @@ pode sobrepor este contrato sem decisão explícita do mantenedor.**
 | Ordem | ID          | pt-BR       | English      | Função                          |
 |-------|-------------|-------------|--------------|---------------------------------|
 | 1     | display     | Tela        | Display      | Configurações de vídeo/janela   |
-| 2     | graphics    | Gráficos    | Graphics     | Upscaling experimental          |
+| 2     | graphics    | Gráficos    | Graphics     | Upscaling estacionado (v2.2.0) |
 | 3     | performance | Desempenho  | Performance  | FPS, GPU, shaders               |
 | 4     | game        | Jogo        | Game         | Cheats, pastas, saves, idioma   |
 | 5     | patches     | Patches     | Patches      | Patches internos + externos     |
@@ -87,7 +87,20 @@ pode sobrepor este contrato sem decisão explícita do mantenedor.**
 - A ponte Python importa `gow3_launcher_win` como BIBLIOTECA (sem Tk).
 - Chaves/listas/valores vêm SEMPRE do backend (nada inventado no frontend).
 - Patches: `_resolve_patches_dir` usa a MESMA resolucao de `game_environment()` para GOW3_PATCHES_DIR (fonte unica, sem fallback divergente; o usuario configura `patches_dir` no backend para apontar para pastas externas).
+- Patches ALWAYS_ON (v2.2.0, ex.: Startup Black Screen): NÃO aparecem na lista da página
+  Patches e são aplicados sempre pelo motor — inclusive com seleções salvas antigas.
 - Persistência: settings.json / gow3.ini / mods.json / patches.json / mods_presets.json.
+- gow3.ini (v2.2.0): a ponte grava SOMENTE as chaves pedidas (`set_ini`); alterações feitas
+  DENTRO do jogo e chaves legadas fora do contrato (fsr1/rcas/rcas_strength/sharpen/sharpness)
+  nunca são regravadas. `save_ini` do backend agora usa escrita atômica (atomic_write).
+- glyph_style (v2.2.0): dropdown "Ícones de botões no jogo" na página Controles
+  (off/auto/xbox/nintendo = GLYPH_STYLES do backend); exportado como GOW3_GLYPH_STYLE pelo
+  game_environment; os ícones são montados pelo run.py em CÓPIAS de WADs (pasta do jogo intacta).
+- Upscaling temporal ESTACIONADO pelo motor na v2.2.0 (GOW3_EXPERIMENTAL_UPSCALER fixo em '0',
+  GOW3_UPSCALER='none'): a página Gráficos NÃO oferece controles funcionais de upscaling —
+  apenas informa o estado e a preferência legada preservada. Upscalers do contrato: fsr3/taa/off.
+- FSR 1 removido do motor (shim força fsr1=false) e FSR 4 removido do upstream: NENHUM dos
+  dois é apresentado na UI; download de arquivos FSR 4 não existe mais.
 
 ## 8. SUPERVISÃO DE PROCESSOS
 
@@ -115,7 +128,9 @@ O projeto acompanha as atualizações técnicas estáveis de FelipePrado0/gow3_p
   justificativa + aprovação visual específica do mantenedor.
 - Nenhuma substituição de UI, nenhum bypass, nenhum merge automático.
 
-**Próxima versão técnica:** windows-v2.2.0, commit af5930a0e3bb6bd257563d0bfd6fa09210a78310.
+**Versão técnica integrada (branch `chore/upstream-windows-v2.2.0`):** windows-v2.2.0,
+commit af5930a0e3bb6bd257563d0bfd6fa09210a78310 — árvore oficial blob-idêntica (36 arquivos),
+launcher/cinematic/** preservado.
 **Prioridades:** compatibilidade, novas funcionalidades, gravação segura de configurações, patches obrigatórios, inicialização do jogo e gerenciamento de processos.
 
 ## 10. TESTES ANTIRREGRESSÃO

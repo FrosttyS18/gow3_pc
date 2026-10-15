@@ -10,7 +10,7 @@ process with PYTHONIOENCODING=utf-8 as well).
 Commands (M1.2):
   state                       -> everything the UI needs: settings, ini, choices (all real
                                   option lists), game status, music, mods, patches (built-in
-                                  and external), backups, controls, presets, fsr4, version
+                                  and external), backups, controls, presets, version
   set_ini {values} / set_app {values}
   set_game_patches {names[]}            (settings.json game_patches[title_id])
   set_external_patches {enabled[], disabled[]}
@@ -161,6 +161,7 @@ def all_choices(app: dict) -> dict:
         "language": choice_labels(L.LANGUAGES),
         "ui_language": choice_labels(L.UI_LANGUAGES),
         "video_backend": choice_labels(L.VIDEO_BACKENDS),
+        "glyph_style": choice_labels(L.GLYPH_STYLES),
         "gpu_id": [{"value": "", "label": "Automático"}] + [
             {"value": row[0], "label": row[1]} for row in gpus],
         "no_msaa": choice_labels(L.no_msaa_options(gpus, app.get("gpu_id", ""))),
@@ -180,7 +181,7 @@ def _resolve_patches_dir(app: dict) -> Path:
 
 def patches_state(app: dict) -> dict:
     import xml.etree.ElementTree as ET
-    from patches import EXCLUSIVE_PREFIX
+    from patches import ALWAYS_ON, EXCLUSIVE_PREFIX
     folder = meta_dir(app)
     title_id, profile = L.game_profile_of(folder)
     builtin = []
@@ -192,8 +193,8 @@ def patches_state(app: dict) -> dict:
                                                      if m.get("isEnabled", "false").lower() == "true"}
         for meta in metas:
             name = meta.get("Name")
-            if name.startswith(EXCLUSIVE_PREFIX) or name.startswith("Frame Rate Patch"):
-                continue
+            if name.startswith(EXCLUSIVE_PREFIX) or name.startswith("Frame Rate Patch") or name in ALWAYS_ON:
+                continue  # ALWAYS_ON (v2.2.0): correções sem escolha, aplicadas sempre — inclusive com listas salvas antigas
             builtin.append({"name": name, "author": meta.get("Author"),
                             "note": meta.get("Note"), "enabled": name in on})
     from patches import external_patches
@@ -247,12 +248,6 @@ def controls_state(app: dict) -> dict:
             "rows": rows}
 
 
-def fsr4_state() -> dict:
-    total, missing = len(L.fsr4_files()), len(L.fsr4_missing())
-    return {"installed": total - missing, "total": total, "missing": missing,
-            "folder": str(L.fsr4_folder())}
-
-
 def translations_state() -> dict:
     """Tabelas de tradução oficiais (gow3_lang.table) por idioma — EN é a chave."""
     import gow3_lang
@@ -283,7 +278,6 @@ def cmd_state() -> dict:
         "mods": mods_state(app),
         "backups": backups_state(app),
         "controls": controls_state(app),
-        "fsr4": fsr4_state(),
         "running": game_running(),
         "translations": translations_state(),
     }
@@ -296,17 +290,18 @@ def save_app(app: dict) -> None:
 
 
 def cmd_set_ini(values: dict) -> dict:
+    """Grava SOMENTE as chaves pedidas (v2.2.0: preserva alterações feitas dentro do jogo
+    e chaves legadas fsr1/rcas/sharpen/sharpness — removidas do contrato do port — porque
+    nenhuma outra chave é relida/regravada)."""
     ini, lines = L.load_ini()
     for key, value in values.items():
         if key not in L.INI_DEFAULTS:
             return {"error": f"gow3.ini key not part of the port contract: {key}"}
         if key in L.INI_FLAGS:
             ini[key] = "1" if value in (True, "1", 1) else "0"
-        elif key == "sharpness":
-            ini[key] = f"{float(value):.2f}"
         else:
             ini[key] = str(value)
-    L.save_ini({key: ini[key] for key in L.INI_DEFAULTS}, lines)
+    L.save_ini({key: ini[key] for key in values}, lines)
     return {"ok": True, "ini": dict(sorted(L.load_ini()[0].items()))}
 
 
