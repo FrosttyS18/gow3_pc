@@ -618,6 +618,13 @@ def dispatch(request: dict) -> dict:
             response = prepare_play()
         elif cmd == "play_status":
             response = cmd_play_status()
+        elif cmd == "test_sleep":
+            # APENAS para testes automatizados (cargo): dorme N segundos (máx 600)
+            # para exercitar o TIMEOUT do worker sem repetição de efeitos.
+            import time
+            seconds = min(max(float(request.get("seconds", 1)), 0.0), 600.0)
+            time.sleep(seconds)
+            response = {"ok": True, "slept": seconds}
         else:
             response = {"error": f"unknown command: {cmd!r}"}
     except Exception as error:  # fail loud, never half-written state

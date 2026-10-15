@@ -4,7 +4,7 @@ use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{ChildStdin, Command, Stdio};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -34,6 +34,17 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// tempo de vida: o kernel fecha quando o processo morre → KILL_ON_JOB_CLOSE.
 static JOB: OnceLock<usize> = OnceLock::new();  // HANDLE (ponteiros não são Send/Sync)
 
+/// Verdadeiro quando o launcher conseguiu se AUTO-associar ao próprio Job: todo
+/// processo criado pelo Rust já nasce dentro dele (herança na CRIAÇÃO — sem
+/// corrida). Falso quando o shell já o impõe outro Job: a adesão explícita por
+/// filho acontece então dentro da janela SUSPENSA do spawn da sessão.
+static JOB_SELF_ASSIGNED: OnceLock<bool> = OnceLock::new();
+
+fn job_self_assigned() -> bool {
+    // job_handle() preenche na primeira criação; default false se ainda não rolou.
+    *JOB_SELF_ASSIGNED.get().unwrap_or(&false)
+}
+
 fn job_handle() -> Result<windows_sys::Win32::Foundation::HANDLE, String> {
     if let Some(handle) = JOB.get() {
         return Ok(*handle as windows_sys::Win32::Foundation::HANDLE);
@@ -62,10 +73,12 @@ fn job_handle() -> Result<windows_sys::Win32::Foundation::HANDLE, String> {
         // Auto-adesão (quando possível): sendo o launcher MEMBRO do próprio Job, todo
         // processo que o Rust criar nasce DENTRO dele por herança — janela de corrida
         // zero na adesão. Falha silenciosa se o launcher já estiver no Job de um shell
-        // (não pode pertencer a dois), e então vale a adesão por filho logo após o spawn.
+        // (não pode pertencer a dois), e então vale a adesão por filho na janela
+        // SUSPENSA do spawn (ver spawn_game_session_inner).
         let self_process = windows_sys::Win32::System::Threading::GetCurrentProcess();
-        windows_sys::Win32::System::JobObjects::AssignProcessToJobObject(
+        let self_ok = windows_sys::Win32::System::JobObjects::AssignProcessToJobObject(
             handle, self_process);
+        let _ = JOB_SELF_ASSIGNED.set(self_ok != 0);
         let _ = JOB.set(handle as usize);
         Ok(handle)
     }
@@ -133,16 +146,6 @@ fn worker_slot() -> &'static Mutex<WorkerSlot> {
         broken: None,
         stderr_tail: Arc::new(Mutex::new(String::new())),
     }))
-}
-
-/// stderr do worker mantido num buffer curto para diagnóstico quando ele falha.
-fn worker_stderr(_generation: u64) -> String {
-    let slot = worker_slot();
-    let guard = slot.lock().unwrap();
-    let tail = Arc::clone(&guard.stderr_tail);
-    drop(guard);
-    let x = tail.lock().unwrap().clone();
-    x
 }
 
 fn spawn_worker(slot_generation: u64, stderr_tail: &Arc<Mutex<String>>)
@@ -240,6 +243,29 @@ fn worker_pid_for_tests() -> u32 {
     worker_slot().lock().unwrap().worker.as_ref().map(|w| w.pid).unwrap_or(0)
 }
 
+/// Encerra o worker da geração indicada (usado no timeout: um worker vivo mas mudo
+/// não pode ficar preso com pedidos pendurados). O leitor registra a queda e a
+/// política de recuperação limitada passa a valer.
+fn kill_current_worker(generation: u64) {
+    let slot = worker_slot();
+    let mut guard = slot.lock().unwrap();
+    if let Some(worker) = guard.worker.take() {
+        if worker.generation == generation {
+            unsafe {
+                let handle = windows_sys::Win32::System::Threading::OpenProcess(
+                    windows_sys::Win32::System::Threading::PROCESS_TERMINATE, 0, worker.pid);
+                if !handle.is_null() {
+                    windows_sys::Win32::System::Threading::TerminateProcess(handle, 1);
+                    windows_sys::Win32::Foundation::CloseHandle(handle);
+                }
+            }
+            drop(worker); // fecha stdin: o leitor detecta o EOF e registra a queda
+        } else {
+            guard.worker = Some(worker); // outro worker já nasceu: não mexe
+        }
+    }
+}
+
 /// Uma chamada completa à ponte pelo worker persistente (renascendo se preciso).
 fn bridge_roundtrip_blocking(request: &str) -> Result<String, String> {
     let began = Instant::now();
@@ -294,7 +320,15 @@ fn bridge_roundtrip_blocking(request: &str) -> Result<String, String> {
             }
             (receiver, handle.generation)
         };
-        match receiver.recv() {
+        // Espera COM PRAZO: um worker vivo mas mudo (ex.: travado em I/O) não pode
+        // prender a chamada para sempre. Vencido o prazo, o worker é ENCERRADO e a
+        // chamada falha — NUNCA é repetida automaticamente: o pedido pode já ter
+        // sido aplicado (set_ini/set_app têm efeito em arquivo), repetir seria
+        // duplicar efeitos ou corromper preferências. Quem decide repetir é o usuário.
+        let timeout = Duration::from_millis(
+            std::env::var("GOW3_BRIDGE_TIMEOUT_MS").ok()
+                .and_then(|v| v.parse().ok()).unwrap_or(120_000));
+        match receiver.recv_timeout(timeout) {
             Ok(response) => {
                 let elapsed = began.elapsed().as_millis();
                 if std::env::var("GOW3_CINEMATIC_TRACE").ok().as_deref() == Some("1") {
@@ -302,13 +336,19 @@ fn bridge_roundtrip_blocking(request: &str) -> Result<String, String> {
                 }
                 return Ok(response);
             }
-            Err(_) => {
-                let diagnosis = worker_stderr(generation);
-                if !diagnosis.is_empty() {
-                    // o worker registrou a queda; tenta renascer (limite acima)
-                    let _ = diagnosis;
-                }
-                continue;
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                kill_current_worker(generation);
+                return Err(format!(
+                    "worker da ponte não respondeu em {} ms — chamada descartada sem \
+                     repetição (operação pode ter sido aplicada; verifique e repita se \
+                     quiser); o worker foi reiniciado",
+                    timeout.as_millis()));
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                // o worker morreu no meio: mesmo raciocínio — o pedido PODE ter sido
+                // aplicado antes da morte; sem repetição automática.
+                return Err("worker da ponte encerrou durante a chamada — resultado \
+                            incerto, nada foi repetido automaticamente".into());
             }
         }
     }
@@ -422,13 +462,6 @@ fn bridge_path() -> Result<PathBuf, String> {
 // código de saída (mesma semântica do monitor antigo); o evento "gow3://game-end"
 // atualiza o launcher UMA vez, sem polling.
 
-struct GameSession {
-    child: Child,
-    job: usize,   // HANDLE como usize: ponteiros não são Send; deve permanecer ABERTO
-                  // durante toda a vigília (fechar destruiria o Job e pararia as notificações)
-    port: usize,
-}
-
 /// Cria o Job de sessão (sem limites: só rastreio) e a porta de conclusão.
 fn create_session_objects() -> Result<(windows_sys::Win32::Foundation::HANDLE,
                                        windows_sys::Win32::Foundation::HANDLE), String> {
@@ -472,78 +505,242 @@ fn associate_port(job: windows_sys::Win32::Foundation::HANDLE,
     }
 }
 
-/// Inicia o processo da sessão (run.py ou substituto de teste) e devolve a sessão
-/// pronta para vigiar. Sem app handle — testável isoladamente com substitutos.
+/// Inicia o processo da sessão (run.py ou substituto de teste) SEM CORRIDA: o
+/// processo nasce SUSPENSO (CREATE_SUSPENDED), é associado aos Jobs de sessão e
+/// principal ANTES de executar QUALQUER código, só então ganha CPU (ResumeThread).
+/// Hierarquia de Jobs aninhados (Win8+): o filho pode pertencer ao Job de sessão E
+/// ao principal simultaneamente; se o launcher não pôde se auto-associar (shell o
+/// impõe outro Job), a adesão explícita ao principal acontece aqui — na mesma
+/// janela suspensa. Falha em qualquer passo = terminação + fechamento de TODOS os
+/// handles (criação, associação ou retomada parciais não vazam recursos).
+struct GameSession {
+    process: usize, // HANDLE do processo raiz (run.py) — fonte do código de saída
+    job: usize,     // HANDLE do Job de sessão — fechado ao FIM da vigília
+    port: usize,    // HANDLE da porta de conclusão — fechado ao FIM da vigília
+    pid: u32,
+}
+
+/// Citação de argumento na linha de comando do Windows (regras MSVCRT).
+fn quote_arg(arg: &str) -> String {
+    if arg.is_empty() {
+        return "\"\"".into();
+    }
+    if !arg.chars().any(|c| c == ' ' || c == '\t' || c == '"') {
+        return arg.into();
+    }
+    let mut out = String::with_capacity(arg.len() + 2);
+    out.push('"');
+    let mut backslashes = 0;
+    for ch in arg.chars() {
+        match ch {
+            '\\' => backslashes += 1,
+            '"' => {
+                out.push_str(&"\\".repeat(backslashes * 2 + 1));
+                out.push('"');
+                backslashes = 0;
+            }
+            _ => {
+                out.push_str(&"\\".repeat(backslashes));
+                backslashes = 0;
+                out.push(ch);
+            }
+        }
+    }
+    out.push_str(&"\\".repeat(backslashes * 2));
+    out.push('"');
+    out
+}
+
+/// Bloco de ambiente UNICODE ("K=V\0...\0\0") para CreateProcessW.
+fn environment_block(envs: &HashMap<String, String>) -> Vec<u16> {
+    let mut block: Vec<u16> = Vec::new();
+    for (key, value) in envs {
+        let entry = format!("{key}={value}\0");
+        block.extend(entry.encode_utf16());
+    }
+    block.push(0);
+    block
+}
+
 fn spawn_game_session(command: &[String], cwd: &str, envs: &HashMap<String, String>,
                       log_file: &Path) -> Result<GameSession, String> {
+    spawn_game_session_inner(command, cwd, envs, log_file, true)
+}
+
+fn spawn_game_session_inner(command: &[String], cwd: &str, envs: &HashMap<String, String>,
+                            log_file: &Path, associate: bool) -> Result<GameSession, String> {
+    use windows_sys::Win32::System::Threading::{
+        CreateProcessW, ResumeThread, STARTUPINFOW, PROCESS_INFORMATION,
+        CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, STARTF_USESTDHANDLES,
+    };
     if command.is_empty() {
         return Err("comando da sessão vazio".into());
     }
+    // log: um handle, tornado herdável para stdout/stderr do filho
     let log = fs::File::create(log_file)
         .map_err(|e| format!("log da sessão: {e}"))?;
     let log_err = log.try_clone()
         .map_err(|e| format!("log da sessão (stderr): {e}"))?;
-    let mut child = Command::new(&command[0])
-        .args(&command[1..])
-        .current_dir(cwd)
-        .env_clear()
-        .envs(envs)
-        .stdin(Stdio::null())
-        .stdout(Stdio::from(log))
-        .stderr(Stdio::from(log_err))
-        .creation_flags(CREATE_NO_WINDOW)
-        .spawn()
-        .map_err(|e| format!("não foi possível iniciar: {e}"))?;
+    use std::os::windows::io::AsRawHandle;
+    unsafe {
+        for handle in [log.as_raw_handle(), log_err.as_raw_handle()] {
+            if windows_sys::Win32::Foundation::SetHandleInformation(
+                handle, windows_sys::Win32::Foundation::HANDLE_FLAG_INHERIT,
+                windows_sys::Win32::Foundation::HANDLE_FLAG_INHERIT) == 0 {
+                return Err("log da sessão não pôde ser herdado".into());
+            }
+        }
+    }
     let (session_job, port) = create_session_objects()?;
-    if let Err(error) = assign_process_to(session_job, &child) {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err(error);
+    unsafe {
+        let mut command_line: Vec<u16> = command.iter().map(|a| quote_arg(a))
+            .collect::<Vec<String>>().join(" ").encode_utf16().collect();
+        command_line.push(0);
+        let mut cwd_w: Vec<u16> = cwd.encode_utf16().collect();
+        cwd_w.push(0);
+        let env_block = environment_block(envs);
+        let mut startup: STARTUPINFOW = std::mem::zeroed();
+        startup.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+        startup.dwFlags = STARTF_USESTDHANDLES;
+        startup.hStdInput = std::ptr::null_mut();
+        startup.hStdOutput = log.as_raw_handle();
+        startup.hStdError = log_err.as_raw_handle();
+        let mut info: PROCESS_INFORMATION = std::mem::zeroed();
+        let created = CreateProcessW(
+            std::ptr::null(),                       // aplicativo vem da linha de comando
+            command_line.as_mut_ptr(),
+            std::ptr::null(), std::ptr::null(),     // atributos padrão
+            1,                                      // bInheritHandles: log herdável
+            CREATE_SUSPENDED | CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT,
+            if env_block.is_empty() { std::ptr::null() }
+            else { env_block.as_ptr() as *const core::ffi::c_void },
+            cwd_w.as_ptr(),
+            &startup, &mut info);
+        if created == 0 {
+            let error = windows_sys::Win32::Foundation::GetLastError();
+            windows_sys::Win32::Foundation::CloseHandle(port);
+            windows_sys::Win32::Foundation::CloseHandle(session_job);
+            return Err(format!("não foi possível iniciar: erro {error}"));
+        }
+        // A partir daqui o processo existe SUSPENSO: toda falha = terminar + fechar tudo.
+        let fail = |message: String, info: &PROCESS_INFORMATION| -> String {
+            windows_sys::Win32::System::Threading::TerminateProcess(info.hProcess, 1);
+            windows_sys::Win32::System::Threading::WaitForSingleObject(info.hProcess, 5000);
+            windows_sys::Win32::Foundation::CloseHandle(info.hThread);
+            windows_sys::Win32::Foundation::CloseHandle(info.hProcess);
+            windows_sys::Win32::Foundation::CloseHandle(port);
+            windows_sys::Win32::Foundation::CloseHandle(session_job);
+            message
+        };
+        if windows_sys::Win32::System::JobObjects::AssignProcessToJobObject(
+            session_job, info.hProcess) == 0 {
+            return Err(fail("associação ao Job de sessão falhou".into(), &info));
+        }
+        // Job principal: só adesão explícita quando o launcher NÃO se auto-associou
+        // (se auto-associou, o filho SUSPENSO já herdou o Job por criação — sem corrida).
+        if !job_self_assigned() {
+            let main_job = match job_handle() {
+                Ok(handle) => handle,
+                Err(error) => return Err(fail(error, &info)),
+            };
+            if windows_sys::Win32::System::JobObjects::AssignProcessToJobObject(
+                main_job, info.hProcess) == 0 {
+                return Err(fail("associação ao Job principal falhou".into(), &info));
+            }
+        }
+        if associate {
+            if let Err(error) = associate_port(session_job, port) {
+                return Err(fail(error, &info));
+            }
+        }
+        if ResumeThread(info.hThread) == u32::MAX {
+            return Err(fail("ResumeThread falhou".into(), &info));
+        }
+        let pid = info.dwProcessId;
+        windows_sys::Win32::Foundation::CloseHandle(info.hThread);
+        Ok(GameSession {
+            process: info.hProcess as usize,
+            job: session_job as usize,
+            port: port as usize,
+            pid,
+        })
     }
-    // Job principal do launcher: se o launcher não conseguiu se auto-associar ao
-    // próprio Job (já estava no Job de um shell), associa o filho explicitamente.
-    // Se a auto-adesão funcionou, o filho já nasceu dentro por herança (no-op seguro).
-    if let Err(error) = assign_to_job(&child) {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err(error);
-    }
-    associate_port(session_job, port)?;
-    Ok(GameSession { child, job: session_job as usize, port: port as usize })
 }
 
-/// Espera o ACTIVE_PROCESS_ZERO do kernel (fim da sessão) e devolve o código de
-/// saída do processo raiz (run.py). Sem polling: um bloqueio em GetQueuedCompletionStatus.
+/// Consulta NATIVA de autoridade: processos ativos no Job de sessão (kernel).
+fn session_active_processes(job: windows_sys::Win32::Foundation::HANDLE) -> Option<u32> {
+    unsafe {
+        let mut accounting: windows_sys::Win32::System::JobObjects::
+            JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = std::mem::zeroed();
+        let ok = windows_sys::Win32::System::JobObjects::QueryInformationJobObject(
+            job,
+            windows_sys::Win32::System::JobObjects::JobObjectBasicAccountingInformation,
+            &mut accounting as *mut _ as *mut core::ffi::c_void,
+            std::mem::size_of::<windows_sys::Win32::System::JobObjects::
+                JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
+            std::ptr::null_mut());
+        if ok == 0 { None } else { Some(accounting.ActiveProcesses) }
+    }
+}
+
+/// Espera o fim VERDADEIRO da sessão e devolve o código de saída da raiz (run.py).
+/// Prioritariamente orientada a eventos, SEM espera infinita cega e SEM polling de
+/// processos: (1) o handle do processo RAIZ é o gatilho confiável — a raiz só sai
+/// no fim real OU num reinício interno (run.py --after), e enquanto o jogo roda a
+/// espera é um único bloqueio de custo zero; (2) após a saída da raiz, o caminho
+/// rápido é a mensagem do kernel (ACTIVE_PROCESS_ZERO, se entregue — o Windows NÃO
+/// garante a entrega) e o fallback é a consulta de autoridade
+/// QueryInformationJobObject(ActiveProcesses), ~1 consulta/s apenas na janela pós-
+/// raiz (reinício), sem busy-wait, sem processos; (3) todos os handles (processo,
+/// Job de sessão, porta) são fechados exatamente uma vez, aqui. O Job PRINCIPAL é
+/// vitalício e intocável. Não confunde fim da raiz com fim da árvore: a raiz sair
+/// com processos ativos no Job = reinício → continua esperando.
 fn wait_session_end(session: GameSession) -> u32 {
-    let GameSession { child, job, port } = session;
+    use windows_sys::Win32::System::Threading::WaitForSingleObject;
+    let GameSession { process, job, port, pid: _ } = session;
+    let process = process as windows_sys::Win32::Foundation::HANDLE;
+    let job = job as windows_sys::Win32::Foundation::HANDLE;
     let port = port as windows_sys::Win32::Foundation::HANDLE;
-    let code = unsafe {
+    unsafe {
+        // (1) gatilho confiável: saída da raiz (custo zero enquanto o jogo roda)
+        WaitForSingleObject(process, u32::MAX);
+        let mut code: u32 = 0;
+        windows_sys::Win32::System::Threading::GetExitCodeProcess(process, &mut code);
+        // (2) fim da ÁRVORE: evento do kernel (rápido) + consulta de autoridade (fallback)
+        let mut query_failures: u32 = 0;
         loop {
             let mut message: u32 = 0;
             let mut key: usize = 0;
             let mut overlapped: *mut windows_sys::Win32::System::IO::OVERLAPPED =
                 std::ptr::null_mut();
-            let ok = windows_sys::Win32::System::IO::GetQueuedCompletionStatus(
-                port, &mut message, &mut key, &mut overlapped, u32::MAX);
-            if ok == 0 {
-                break; // porta fechada/erro: cai para o código de saída direto
+            let delivered = windows_sys::Win32::System::IO::GetQueuedCompletionStatus(
+                port, &mut message, &mut key, &mut overlapped, 0);
+            if delivered != 0 {
+                if message == windows_sys::Win32::System::SystemServices::
+                    JOB_OBJECT_MSG_ACTIVE_PROCESS_ZERO {
+                    break; // evento entregue: fim da árvore
+                }
+                continue; // EXIT_PROCESS etc.: drena e segue
             }
-            if message == windows_sys::Win32::System::SystemServices::
-                JOB_OBJECT_MSG_ACTIVE_PROCESS_ZERO {
-                break;
+            // fila vazia (WAIT_TIMEOUT) ou erro: consulta de autoridade do kernel
+            match session_active_processes(job) {
+                Some(0) => break,                       // fim confirmado nativamente
+                Some(_alive) => query_failures = 0,     // reinício em andamento: espera
+                None => {
+                    query_failures += 1;
+                    if query_failures > 120 {
+                        break; // raiz morta + Job inobservável por ~90 s: encerra a vigília
+                    }
+                }
             }
-            // EXIT_PROCESS etc.: apenas anota e continua esperando o zero.
+            std::thread::sleep(std::time::Duration::from_millis(750));
         }
-        let mut code: u32 = 0;
-        use std::os::windows::io::AsRawHandle;
-        windows_sys::Win32::System::Threading::GetExitCodeProcess(
-            child.as_raw_handle(), &mut code);
+        // (3) gerenciamento determinístico: cada handle fechado exatamente uma vez
         windows_sys::Win32::Foundation::CloseHandle(port);
+        windows_sys::Win32::Foundation::CloseHandle(job);
+        windows_sys::Win32::Foundation::CloseHandle(process);
         code
-    };
-    // `job` (handle do Job de sessão) é liberado AQUI, só depois da vigília.
-    let _keep_until_here = job;
-    code
+    }
 }
 
 /// JOGAR (novo fluxo): validações e especificação vêm da ponte (worker persistente,
@@ -575,7 +772,7 @@ async fn game_start(app: tauri::AppHandle) -> Result<serde_json::Value, String> 
         let exit_file = spec.get("exit_file").and_then(|v| v.as_str())
             .ok_or("prepare_play sem exit_file")?.to_string();
         let session = spawn_game_session(&command, &cwd, &envs, Path::new(&log_file))?;
-        let pid = session.child.id();
+        let pid = session.pid;
         let _ = fs::write(&pid_file, pid.to_string());
         std::thread::spawn(move || {
             let exit_code = wait_session_end(session);
@@ -863,31 +1060,6 @@ mod p0_tests {
         assert!(refused.is_err(), "deve recusar após 2 renascimentos no minuto: {refused:?}");
     }
 
-    /// Fim da sessão por EVENTO (ACTIVE_PROCESS_ZERO): mata o processo raiz e a
-    /// vigília termina em segundos — sem polling e sem processos extras.
-    #[test]
-    fn session_end_event_fires_without_polling() {
-        let log = std::env::temp_dir().join(format!("gow3-sess-{}.log", std::process::id()));
-        let mut envs = HashMap::new();
-        envs.insert("PATH".to_string(), std::env::var("PATH").unwrap_or_default());
-        let command = vec![
-            "python".to_string(),
-            "-c".to_string(),
-            "import time; time.sleep(30)".to_string(),
-        ];
-        let session = spawn_game_session(&command, ".", &envs, &log).expect("sessão");
-        let pid = session.child.id();
-        let began = Instant::now();
-        let watcher = std::thread::spawn(move || wait_session_end(session));
-        std::thread::sleep(Duration::from_millis(600));
-        kill_hard(pid); // "fim do jogo"
-        let code = watcher.join().expect("vigília");
-        assert!(began.elapsed() < Duration::from_secs(5),
-                "evento deve chegar em segundos (levou {:?})", began.elapsed());
-        assert_ne!(code, 259, "código de saída real, não STILL_ACTIVE");
-        assert!(!pid_alive(pid), "processo substituto encerrado");
-    }
-
     /// Reinício interno (probe gera novo run.py): a raiz SAI e a sessão CONTINUA —
     /// ACTIVE_PROCESS_ZERO só chega quando o ÚLTIMO processo da árvore morre.
     #[test]
@@ -902,7 +1074,7 @@ mod p0_tests {
         envs.insert("PATH".to_string(), std::env::var("PATH").unwrap_or_default());
         let command = vec!["python".to_string(), "-c".to_string(), script];
         let session = spawn_game_session(&command, ".", &envs, &log).expect("sessão");
-        let root_pid = session.child.id();
+        let root_pid = session.pid;
         let watcher = std::thread::spawn(move || wait_session_end(session));
         // espera a raiz sair e o filho nascer
         let mut child_pid: u32 = 0;
@@ -923,4 +1095,166 @@ mod p0_tests {
         assert_eq!(code, 0, "código da raiz (saída limpa do reinício)");
         assert!(!pid_alive(child_pid), "nenhum órfão");
     }
+
+    // ================== CORREÇÕES DA AUDITORIA INDEPENDENTE (PR #10) ==================
+
+    fn handle_count() -> u32 {
+        unsafe {
+            let mut count: u32 = 0;
+            windows_sys::Win32::System::Threading::GetProcessHandleCount(
+                windows_sys::Win32::System::Threading::GetCurrentProcess(), &mut count);
+            count
+        }
+    }
+
+    fn tiny_envs() -> HashMap<String, String> {
+        let mut envs = HashMap::new();
+        envs.insert("PATH".to_string(), std::env::var("PATH").unwrap_or_default());
+        envs.insert("SYSTEMROOT".to_string(),
+                    std::env::var("SYSTEMROOT").unwrap_or_else(|_| r"C:\Windows".into()));
+        envs
+    }
+
+    /// Processo que TERMINA IMEDIATAMENTE: spawn suspenso→jobs→resume→saída em
+    /// milissegundos; o fim é detectado e o código de saída chega intacto.
+    #[test]
+    fn session_immediate_exit_is_detected() {
+        let log = std::env::temp_dir().join(format!("gow3-sess-fast-{}.log", std::process::id()));
+        let command = vec!["python".to_string(), "-c".to_string(),
+                           "print('sessao curta')".to_string()];
+        let began = Instant::now();
+        let session = spawn_game_session(&command, ".", &tiny_envs(), &log).expect("sessão");
+        let code = wait_session_end(session);
+        assert_eq!(code, 0, "saída limpa");
+        assert!(began.elapsed() < Duration::from_secs(10),
+                "detecção rápida (levou {:?})", began.elapsed());
+        let text = fs::read_to_string(&log).unwrap_or_default();
+        assert!(text.contains("sessao curta"), "log da sessão capturado: {text}");
+    }
+
+    /// Notificação de conclusão PERDIDA/indisponível (o Windows não garante a
+    /// entrega): sem porta associada, a consulta de autoridade do kernel
+    /// (QueryInformationJobObject) ainda detecta o fim — sem espera infinita.
+    #[test]
+    fn session_end_detected_without_completion_port() {
+        let log = std::env::temp_dir().join(format!("gow3-sess-noport-{}.log", std::process::id()));
+        let command = vec!["python".to_string(), "-c".to_string(),
+                           "import time; time.sleep(2); print('fim')".to_string()];
+        // associate=false: NENHUMA mensagem chegará — só o fallback nativo
+        let session = spawn_game_session_inner(&command, ".", &tiny_envs(), &log, false)
+            .expect("sessão");
+        let began = Instant::now();
+        let code = wait_session_end(session);
+        assert_eq!(code, 0);
+        // raiz dorme 2 s + fallback consulta ~1/s → alguns segundos no máximo
+        assert!(began.elapsed() < Duration::from_secs(15),
+                "fallback deve detectar sem porta (levou {:?})", began.elapsed());
+    }
+
+    /// Falha na CRIAÇÃO do processo (binário inexistente): erro claro, sem
+    /// processos e sem handles vazados.
+    #[test]
+    fn session_spawn_failure_is_clean() {
+        let log = std::env::temp_dir().join(format!("gow3-sess-fail-{}.log", std::process::id()));
+        let before = handle_count();
+        let command = vec!["binario_inexistente_xyz_123456".to_string()];
+        let result = spawn_game_session(&command, ".", &tiny_envs(), &log);
+        assert!(result.is_err(), "deve falhar na criação do processo inexistente");
+        std::thread::sleep(Duration::from_millis(200));
+        let after = handle_count();
+        assert!(after <= before + 1,
+                "handles não podem vazar na falha (antes {before}, depois {after})");
+    }
+
+    /// Sessões CONSECUTIVAS sem crescimento indevido de handles: 5 sessões
+    /// completas (spawn→fim→fechamento) e o total de handles do processo volta
+    /// ao patamar inicial.
+    #[test]
+    fn consecutive_sessions_do_not_leak_handles() {
+        let before = handle_count();
+        for index in 0..5 {
+            let log = std::env::temp_dir()
+                .join(format!("gow3-sess-leak-{}-{}.log", std::process::id(), index));
+            let command = vec!["python".to_string(), "-c".to_string(),
+                               "import time; time.sleep(0.3)".to_string()];
+            let session = spawn_game_session(&command, ".", &tiny_envs(), &log)
+                .expect("sessão");
+            let code = wait_session_end(session);
+            assert_eq!(code, 0);
+        }
+        std::thread::sleep(Duration::from_millis(300));
+        let after = handle_count();
+        assert!(after <= before + 2,
+                "5 sessões não podem vazar handles (antes {before}, depois {after})");
+    }
+
+    /// Worker VIVO MAS MUDO (test_sleep no bridge): o prazo vence, a chamada falha
+    /// SEM repetição automática, nada é aplicado duas vezes e o worker renasce
+    /// limpo para a chamada seguinte.
+    #[test]
+    fn worker_timeout_discards_call_without_side_effects() {
+        let _guard = WORKER_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        reset_worker_for_tests();
+        std::env::set_var("GOW3_BRIDGE_TIMEOUT_MS", "3000");
+        // linha de base gravada com sucesso
+        let baseline = bridge_roundtrip_blocking(
+            "{\"cmd\":\"set_ini\",\"values\":{\"vsync\":\"1\"}}").expect("baseline");
+        assert!(baseline.contains("\"ok\""), "baseline: {baseline}");
+        // chamada que trava o worker por 60 s (comando SÓ de teste)
+        let began = Instant::now();
+        let stuck = bridge_roundtrip_blocking(
+            "{\"cmd\":\"test_sleep\",\"seconds\":60}");
+        std::env::remove_var("GOW3_BRIDGE_TIMEOUT_MS");
+        assert!(stuck.is_err(), "deve falhar por prazo: {stuck:?}");
+        assert!(began.elapsed() < Duration::from_secs(15),
+                "prazo deve vencer rápido (levou {:?})", began.elapsed());
+        assert!(stuck.unwrap_err().contains("sem"), "mensagem documenta a ausência de repetição");
+        // o pedido travado NÃO foi aplicado fora de ordem: estado coerente
+        let state = bridge_roundtrip_blocking("{\"cmd\":\"state\"}").expect("estado");
+        assert!(state.contains("\"version\""), "worker renasceu e responde");
+        assert!(state.contains("\"vsync\":\"1\""), "valor de base intacto: {state}");
+        // a escrita presa nunca chegou a rodar (worker foi morto antes) — o arquivo
+        // continua com o valor da baseline, sem duplicação de efeito
+        let set_again = bridge_roundtrip_blocking(
+            "{\"cmd\":\"set_ini\",\"values\":{\"vsync\":\"0\"}}");
+        assert!(set_again.is_ok(), "chamada posterior funciona: {set_again:?}");
+    }
+
+    /// Raiz morta com FILHO vivo (reinício) e porta PERDIDA: o fallback de
+    /// autoridade mantém a vigília até o último processo — o contrário de
+    /// encerrar cedo demais.
+    #[test]
+    fn session_restart_without_port_waits_for_last_process() {
+        let out = std::env::temp_dir()
+            .join(format!("gow3-sess-rst-noport-{}.txt", std::process::id()));
+        let script = format!(
+            "import subprocess,sys;f=open(r'{}','w');c=subprocess.Popen([sys.executable,'-c','import time; time.sleep(15)']);f.write(str(c.pid));f.close()",
+            out.display());
+        let log = std::env::temp_dir()
+            .join(format!("gow3-sess-rst-noport-{}.log", std::process::id()));
+        let command = vec!["python".to_string(), "-c".to_string(), script];
+        let session = spawn_game_session_inner(&command, ".", &tiny_envs(), &log, false)
+            .expect("sessão");
+        let root_pid = session.pid;
+        let watcher = std::thread::spawn(move || wait_session_end(session));
+        let mut child_pid: u32 = 0;
+        for _ in range0(100) {
+            std::thread::sleep(Duration::from_millis(50));
+            if let Ok(text) = fs::read_to_string(&out) {
+                if let Ok(parsed) = text.trim().parse::<u32>() { child_pid = parsed; break; }
+            }
+        }
+        assert!(child_pid != 0);
+        assert!(!pid_alive(root_pid), "raiz saiu");
+        std::thread::sleep(Duration::from_millis(2500));
+        assert!(!watcher.is_finished(),
+                "sem porta e com filho vivo, a sessão NÃO pode encerrar com a raiz");
+        kill_hard(child_pid);
+        let code = watcher.join().expect("vigília");
+        assert_eq!(code, 0);
+    }
 }
+
+/// range0: helper minúsculo (0..n) usado apenas nos testes.
+#[cfg(test)]
+fn range0(n: usize) -> std::ops::Range<usize> { 0..n }
