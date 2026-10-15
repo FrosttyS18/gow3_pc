@@ -162,6 +162,7 @@ def all_choices(app: dict) -> dict:
         "ui_language": choice_labels(L.UI_LANGUAGES),
         "video_backend": choice_labels(L.VIDEO_BACKENDS),
         "glyph_style": choice_labels(L.GLYPH_STYLES),
+        "anisotropy": choice_labels(L.ANISOTROPY),
         "gpu_id": [{"value": "", "label": "Automático"}] + [
             {"value": row[0], "label": row[1]} for row in gpus],
         "no_msaa": choice_labels(L.no_msaa_options(gpus, app.get("gpu_id", ""))),

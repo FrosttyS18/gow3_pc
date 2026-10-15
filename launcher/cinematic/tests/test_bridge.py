@@ -332,6 +332,54 @@ class ResolvePathTests(BridgeFixture):
                          f"deveria ser exatamente DATA_DIR/user, veio: {path}")
 
 
+class UpstreamV230Tests(BridgeFixture):
+    """v2.3.0: anisotropia (0-16) e vibração (0-100) gravam de verdade no gow3.ini;
+    Discord Rich Presence permanece DESATIVADO por design (nenhuma chave nossa o liga)."""
+
+    def test_anisotropy_choices_and_write(self):
+        _, state = self.bridge({"cmd": "state"})
+        values = [c["value"] for c in state["choices"]["anisotropy"]]
+        self.assertEqual(values, ["0", "2", "4", "8", "16"])
+        self.assertEqual(state["ini"].get("anisotropy", "0"), "0")  # padrão do jogo
+        _, r = self.bridge({"cmd": "set_ini", "values": {"anisotropy": "16"}})
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["ini"]["anisotropy"], "16")
+        text = (self.data / "gow3.ini").read_text(encoding="utf-8")
+        self.assertIn("anisotropy=16", text)
+
+    def test_vibration_write(self):
+        _, r = self.bridge({"cmd": "set_ini", "values": {"vibration": "40"}})
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["ini"]["vibration"], "40")
+        text = (self.data / "gow3.ini").read_text(encoding="utf-8")
+        self.assertIn("vibration=40", text)
+
+    def test_discord_rpc_disabled_by_default_in_environment(self):
+        """Sem UI nem auto-adição: settings padrão ⇒ GOW3_DISCORD='0' (o arquivo
+        oficial scripts/discord_presence.py se autodesativa com esse valor)."""
+        code = ("import sys; sys.path.insert(0, {dir!r});\n"
+                "import gow3_launcher_win as L\n"
+                "env = L.game_environment({{**L.APP_DEFAULTS, 'game_dir': '', 'user_dir': ''}})\n"
+                "print(env.get('GOW3_DISCORD'))")
+        done = subprocess.run([sys.executable, "-c", code.format(dir=str(LAUNCHER_DIR))],
+                              capture_output=True, text=True, env=self.env, timeout=90)
+        self.assertEqual(done.returncode, 0, done.stderr[-300:])
+        self.assertEqual(done.stdout.strip(), "0",
+                         "Discord RPC deve permanecer desativado (GOW3_DISCORD=0)")
+
+    def test_version_230_and_legacy_keys_preserved(self):
+        _, state = self.bridge({"cmd": "state"})
+        self.assertEqual(state["version"], "2.3.0")
+        # preferências legadas continuam no contrato do port
+        for key in ("anisotropy", "vibration", "upscaler", "display_mode"):
+            self.assertIn(key, state["ini"])
+        # FSR4 jamais exposto; discord_rpc existe nos padrões OFICIAIS do backend
+        # (blob-idêntico) mas permanece False — sem UI, sem auto-adição
+        self.assertNotIn("fsr4", state)
+        self.assertIs(state["app"].get("discord_rpc"), False,
+                      "discord_rpc deve permanecer False (decisão definitiva do mantenedor)")
+
+
 class UpstreamV220Tests(BridgeFixture):
     """Adaptações da sincronização windows-v2.2.0: gravação cirúrgica do gow3.ini
     (preserva alterações feitas DENTRO do jogo e chaves legadas fora do contrato),
