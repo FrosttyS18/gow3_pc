@@ -43,12 +43,26 @@ body { font-family: var(--font); color: var(--text); background: var(--bg); }
 .app { position: relative; height: 100vh; overflow: hidden; }
 
 /* ---- background art --------------------------------------------------------- */
-.art { position: absolute; inset: 0; background: var(--bg); }
+/* A camada de fundo nunca captura cliques: o vídeo e a imagem ficam atrás de toda
+ * a interface (o .art é pointer-events:none; os gradientes ::after continuam por
+ * cima do vídeo, preservando a composição aprovada). */
+.art { position: absolute; inset: 0; background: var(--bg); pointer-events: none; }
 .art img {
   position: absolute; inset: 0; width: 100%; height: 100%;
   object-fit: cover; object-position: center;
   animation: storm 9s ease-in-out infinite;
 }
+/* Vídeo de fundo: mesma área/proporção da imagem (cover = 16:9 sem barras), a
+ * animação storm e os gradientes preservados; invisível até estar pronto (fade —
+ * a imagem por baixo cobre o carregamento, sem flash preto) e SOME em erro,
+ * devolvendo a imagem original como fallback. */
+.art .bg-video {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; object-position: center;
+  animation: storm 9s ease-in-out infinite;
+  opacity: 0; transition: opacity 0.8s ease;
+}
+.art .bg-video.on { opacity: 1; }
 @keyframes storm {
   0%, 100% { filter: brightness(1); }
   46% { filter: brightness(1.02); }
@@ -106,7 +120,11 @@ body { font-family: var(--font); color: var(--text); background: var(--bg); }
   font-size: 18.49px;
   line-height: 22.67px;
   letter-spacing: normal;
-  color: #4c4c4c;
+  /* Legibilidade sobre o VÍDEO (decisão do mantenedor): todos os itens em branco
+   * puro, com sombra preta DISCRETA — o hover mantém o brilho quente aprovado e o
+   * ativo mantém a linha vermelha; nada de painéis/fundos novos. */
+  color: #ffffff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6), 0 0 8px rgba(0, 0, 0, 0.4);
   background: transparent; border: 0; padding: 0;
   cursor: pointer; position: relative;
   transition:
@@ -121,20 +139,23 @@ body { font-family: var(--font); color: var(--text); background: var(--bg); }
   font-size: 25.65px;
   line-height: 32px;
   text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.6),
     0 0 12px rgba(255, 244, 220, 0.55),
     0 0 30px rgba(255, 220, 160, 0.22),
     0 8px 22px rgba(200, 30, 37, 0.16);
   outline: none;
 }
-.nav button.active { color: #ffffff; font-size: 25.65px; line-height: 32px; text-shadow: none; }
-/* Música: AÇÃO do menu (não rota): mesmo tipo/hover; ícone discreto; nunca .active */
+.nav button.active { color: #ffffff; font-size: 25.65px; line-height: 32px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6), 0 0 8px rgba(0, 0, 0, 0.4); }
+/* Música: AÇÃO do menu (não rota): mesmo tipo/hover; ícone discreto; nunca .active;
+ * branco puro em AMBOS os estados (o ícone distingue mudo/ativo) */
 .nav button.music-toggle {
   display: inline-flex; align-items: center; gap: 7px;
-  margin-top: 7px; color: #4c4c4c;
+  margin-top: 7px; color: #ffffff;
 }
 .nav button.music-toggle .music-icon { opacity: 0.85; flex: 0 0 auto; }
-.nav button.music-toggle[aria-pressed="false"] { color: #3a3a3a; }
-.nav button.music-toggle[aria-pressed="true"] { color: #5a5a5a; }
+.nav button.music-toggle[aria-pressed="false"] { color: #ffffff; }
+.nav button.music-toggle[aria-pressed="true"] { color: #ffffff; }
 .nav button.music-toggle:hover, .nav button.music-toggle:focus-visible {
   color: #ffffff;
 }

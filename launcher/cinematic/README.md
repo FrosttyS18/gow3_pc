@@ -22,10 +22,13 @@ npm run tauri build -- --no-bundle   # exe em src-tauri/target/release/
 
 ## Arte local (NÃO versionada)
 
-`public/art/` está no `.gitignore`: os exports do Figma do mantenedor e a faixa de música
-(bg-launcher.png, logo-gow-3.png, intro_launcher.mp3/ambient.mp3) são material licenciado
-ou pessoal — copie-os manualmente para `public/art/` antes de rodar/empacotar. Sem eles o
-launcher usa o fundo em gradiente e o título tipográfico de reserva (nada de arte aleatória).
+`public/art/` está no `.gitignore`: os exports do Figma do mantenedor, a faixa de música e
+o vídeo de fundo (bg-launcher.png, logo-gow-3.png, intro_launcher.mp3/ambient.mp3,
+videolauncher.mp4) são material licenciado ou pessoal — copie-os manualmente para
+`public/art/` antes de rodar/empacotar. Sem eles o launcher usa o fundo em gradiente, a
+imagem estática (fallback do vídeo) e o título tipográfico de reserva (nada de arte
+aleatória). O vídeo de fundo (H.264 1920×1080) roda mudo em loop atrás da interface;
+em falha ou ausência, a imagem original assume automaticamente.
 
 ## Música ambiente
 
