@@ -510,29 +510,11 @@ def _check_play_prerequisites(app: dict) -> str | None:
     return None
 
 
-MONITOR_SRC = r"""
-import json, os, subprocess, sys
-pid_file, exit_file, env_file, log_file, cmd_json, cwd = sys.argv[1:7]
-log = open(log_file, "w", encoding="utf-8", errors="replace")
-env = json.load(open(env_file, encoding="utf-8"))
-env = {k: v for k, v in env.items()}
-try:
-    proc = subprocess.Popen(json.loads(cmd_json), cwd=cwd, env=env,
-                            stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
-                            creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
-except OSError as error:
-    log.write("Não foi possível iniciar o processo: " + str(error) + chr(10))
-    log.close()
-    open(exit_file, "w").write("127")
-else:
-    open(pid_file, "w").write(str(proc.pid))
-    rc = proc.wait()
-    log.close()
-    open(exit_file, "w").write(str(rc))
-"""
-
-
-def cmd_play() -> dict:
+def prepare_play() -> dict:
+    """Valida os pré-requisitos e devolve a ESPECIFICAÇÃO de execução (comando, cwd,
+    env, arquivos de ciclo) para o RUST spawnar e supervisionar por eventos. A ponte
+    NÃO cria mais processos aqui: um único worker persistente atende este pedido e o
+    acompanhamento do fim da sessão é orientado a eventos (Job Object de sessão)."""
     import os
     app = app_settings()
     problem = _check_play_prerequisites(app)
@@ -547,42 +529,25 @@ def cmd_play() -> dict:
         command = L.run_command()
         cwd = str(L.PORT_DIR)
         env = L.game_environment(app)
-    monitor = Path(tempfile.gettempdir()) / "gow3-cinematic-monitor.py"
-    monitor.write_text(MONITOR_SRC, encoding="utf-8")
-    exit_file = Path(tempfile.gettempdir()) / "gow3-cinematic-run.exit"
-    env_file = Path(tempfile.gettempdir()) / "gow3-cinematic-run.env.json"
+    exit_file = RUN_PID.with_name("gow3-cinematic-run.exit")
     for stale in (RUN_PID, exit_file):
         try:
             stale.unlink()
         except OSError:
             pass
-    env_file.write_text(json.dumps({str(k): str(v) for k, v in env.items()}), encoding="utf-8")
-    try:
-        subprocess.Popen(
-            [sys.executable, str(monitor), str(RUN_PID), str(exit_file), str(env_file),
-             str(RUN_LOG), json.dumps(command), cwd],
-            stdin=subprocess.DEVNULL,
-            creationflags=getattr(subprocess, "DETACHED_PROCESS", 0)
-            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
-    except OSError as error:
-        return {"error": f"Não foi possível iniciar: {error}"}
-    # pequena espera: falhas imediatas (ex.: binário ausente) já aparecem no status
-    import time
-    for _ in range(20):
-        time.sleep(0.05)
-        try:
-            pid = int(RUN_PID.read_text(encoding="utf-8").strip())
-        except (OSError, ValueError):
-            pid = 0
-        if pid:
-            break
-    return {"ok": True, "pid": pid or None, "log": str(RUN_LOG)}
+    return {"ok": True,
+            "command": [str(part) for part in command],
+            "cwd": cwd,
+            "env": {str(k): str(v) for k, v in env.items()},
+            "pid_file": str(RUN_PID),
+            "exit_file": str(exit_file),
+            "log_file": str(RUN_LOG)}
 
 
 def cmd_play_status() -> dict:
-    """Status do processo monitorado: liveness por PID (somente leitura) e CÓDIGO DE
-    SAÍDA REAL gravado pelo monitor quando o run.py termina."""
-    exit_file = Path(tempfile.gettempdir()) / "gow3-cinematic-run.exit"
+    """Status da sessão (leitura de arquivos apenas — SEM processos): o Rust grava o
+    pid ao iniciar e o código de saída quando o kernel anuncia o fim da sessão."""
+    exit_file = RUN_PID.with_name("gow3-cinematic-run.exit")
     try:
         pid = int(RUN_PID.read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
@@ -613,17 +578,10 @@ def cmd_play_status() -> dict:
             "outcome": outcome, "last_line": last_line, "tail": tail}
 
 
-def main() -> int:
-    # UTF-8 de ponta a ponta: o processo roda com pipes; sem isto o Windows usa cp1252 e
-    # caracteres como '·', 'ã', 'ç' viram bytes inválidos que o Rust converte em U+FFFD.
-    for stream in (sys.stdout, sys.stderr):
-        if hasattr(stream, "reconfigure"):
-            stream.reconfigure(encoding="utf-8")
-    try:
-        request = json.loads(sys.stdin.read() or "{}")
-    except ValueError:
-        print(json.dumps({"error": "invalid JSON request"}, ensure_ascii=False))
-        return 2
+def dispatch(request: dict) -> dict:
+    """Um pedido → uma resposta. Compartilhado pelo modo single-shot e pelo worker
+    persistente (serialização natural: o loop atende um pedido por vez, então
+    escritas de settings.json/gow3.ini nunca correm entre si)."""
     cmd = request.get("cmd")
     try:
         if cmd == "state":
@@ -656,14 +614,63 @@ def main() -> int:
             response = cmd_resolve_path(request.get("name", ""))
         elif cmd == "log_read":
             response = cmd_log_read()
-        elif cmd == "play":
-            response = cmd_play()
+        elif cmd == "prepare_play":
+            response = prepare_play()
         elif cmd == "play_status":
             response = cmd_play_status()
+        elif cmd == "test_sleep":
+            # APENAS para testes automatizados (cargo): dorme N segundos (máx 600)
+            # para exercitar o TIMEOUT do worker sem repetição de efeitos.
+            import time
+            seconds = min(max(float(request.get("seconds", 1)), 0.0), 600.0)
+            time.sleep(seconds)
+            response = {"ok": True, "slept": seconds}
         else:
             response = {"error": f"unknown command: {cmd!r}"}
     except Exception as error:  # fail loud, never half-written state
         response = {"error": f"{type(error).__name__}: {error}"}
+    return response
+
+
+def run_persistent() -> int:
+    """Modo worker (P0): UM processo por launcher atende muitos pedidos — linha JSON
+    {'seq': N, 'req': {...}} no stdin, linha {'seq': N, 'resp': {...}} no stdout, até
+    o EOF. Ocioso (bloqueado no read) quando não há pedidos; o Rust reinicia apenas
+    de forma limitada se morrer. Mantém a compatibilidade: sem a variável de ambiente
+    o bridge continua single-shot (um pedido por processo, como nos testes)."""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            envelope = json.loads(line)
+            seq = envelope.get("seq")
+            response = dispatch(envelope.get("req") or {})
+        except ValueError as error:
+            seq = None
+            response = {"error": f"invalid JSON envelope: {error}"}
+        print(json.dumps({"seq": seq, "resp": response}, ensure_ascii=False), flush=True)
+    return 0
+
+
+def main() -> int:
+    # UTF-8 de ponta a ponta: o processo roda com pipes; sem isto o Windows usa cp1252 e
+    # caracteres como '·', 'ã', 'ç' viram bytes inválidos que o Rust converte em U+FFFD.
+    import os
+    if os.environ.get("GOW3_BRIDGE_PERSISTENT") == "1":
+        return run_persistent()
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
+    try:
+        request = json.loads(sys.stdin.read() or "{}")
+    except ValueError:
+        print(json.dumps({"error": "invalid JSON request"}, ensure_ascii=False))
+        return 2
+    response = dispatch(request)
     print(json.dumps(response, ensure_ascii=False))
     return 2 if "error" in response else 0
 

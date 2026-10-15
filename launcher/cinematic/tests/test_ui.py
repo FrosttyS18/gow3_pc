@@ -320,6 +320,36 @@ def en_checks(cdp):
     go_home(cdp)
 
 
+def game_end_event_test(cdp):
+    """HOTFIX P0 (auditoria): o evento gow3://game-end precisa CHEGAR ao React.
+    Fluxo real com processo substituto de 3 s — o jogo real nunca é executado."""
+    print("\n== EVENTO gow3://game-end → React ==")
+    cdp.eval("window.__gameEndPayload = null;"
+             "window.__TAURI__.event.listen('gow3://game-end',"
+             "  e => { window.__gameEndPayload = JSON.stringify(e.payload); })")
+    started = cdp.eval(
+        "(async () => { try {"
+        "  const r = await window.__TAURI__.core.invoke('game_start');"
+        "  return 'ok:' + JSON.stringify(r);"
+        "} catch (e) { return 'ERR:' + String(e); } })()", await_promise=True)
+    check("game_start aceita o substituto", str(started).startswith("ok:"),
+          str(started)[:160])
+    payload = None
+    for _ in range(40):  # substituto dorme 3 s → evento em poucos segundos
+        time.sleep(0.5)
+        payload = cdp.eval("window.__gameEndPayload")
+        if payload:
+            break
+    check("evento gow3://game-end ENTREGUE à página", bool(payload), "sem payload em 20 s")
+    check("payload com exit_code 0", '"exit_code":0' in str(payload), str(payload)[:120])
+    status = cdp.eval(
+        "(async () => JSON.parse(await window.__GOW3_BRIDGE__"
+        "(JSON.stringify({cmd: 'play_status'}))))()", await_promise=True)
+    check("play_status confirma fim (sem polling: consulta única)",
+          status and status.get("running") is False and status.get("exit_code") == 0,
+          str(status)[:160])
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--exe", default=str(Path(__file__).resolve().parents[1] /
@@ -330,8 +360,14 @@ def main():
     (home / "appdata" / "gow3-launcher").mkdir(parents=True)
     (home / "data").mkdir()
     (home / "data" / "gow3.ini").write_text("engine_fps=240\nrender_resolution=native\n", encoding="utf-8")
+    # fixture jogo (eboot fictício) + SUBSTITUTO descartável no lugar do jogo real:
+    # o teste do evento gow3://game-end precisa do fluxo JOGAR sem tocar no jogo
+    game_dir = home / "fakegame"
+    game_dir.mkdir()
+    (game_dir / "eboot.bin").write_bytes(b"SCE" + b"\0" * 64)
     (home / "appdata" / "gow3-launcher" / "settings.json").write_text(
-        json.dumps({"ui_language": "pt", "ambient_muted": False}), encoding="utf-8")
+        json.dumps({"ui_language": "pt", "ambient_muted": False,
+                    "game_dir": str(game_dir)}), encoding="utf-8")
     # fixture mods: pastas com layout dvdroot_ps4 (o discover exige)
     for mod in ("ModA", "ModB"):
         (home / "data" / "mods" / mod / "dvdroot_ps4").mkdir(parents=True, exist_ok=True)
@@ -340,6 +376,9 @@ def main():
            "APPDATA": str(home / "appdata"), "GOW3_DATA_DIR": str(home / "data"),
            "GOW3_CONFIG": str(home / "data" / "gow3.ini"), "GOW3_GAME_DIR": "",
            "PYTHONIOENCODING": "utf-8",
+           "GOW3_CINEMATIC_SKIP_GAME_CHECK": "1",
+           "GOW3_CINEMATIC_RUN_CMD": json.dumps(
+               [sys.executable, "-c", "print('jogo substituto iniciado'); import time; time.sleep(3)"]),
            "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS":
                f"--remote-debugging-port={PORT} --remote-allow-origins=http://127.0.0.1:{PORT}"}
 
@@ -365,6 +404,7 @@ def main():
             print("FALHA: interface não ficou pronta em 30s")
             sys.exit(1)
         run_tests(cdp)
+        game_end_event_test(cdp)
         cdp.close()
         # segundo ciclo: relançar com ui_language=en (textos novos da v2.2.0 em inglês)
         proc.terminate()

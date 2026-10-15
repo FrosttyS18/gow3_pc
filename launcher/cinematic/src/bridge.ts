@@ -132,7 +132,16 @@ export const bridge = {
     call<{ current: string; latest: string; page: string; newer: boolean }>({ cmd: "update_check" }),
   logRead: () =>
     call<{ sources: { name: string; path: string; text: string }[]; running: boolean }>({ cmd: "log_read" }),
-  play: () => call<{ ok: true; pid: number; log: string }>({ cmd: "play" }),
+  /** JOGAR (hotfix P0): o Rust recebe a especificação da ponte (worker persistente),
+   * inicia a sessão e vigia o fim por EVENTO do kernel (Job Object de sessão) —
+   * nenhum processo novo por clique, nenhum polling durante o jogo. */
+  play: () => {
+    const tauri = (window as unknown as {
+      __TAURI__?: { core: { invoke: (cmd: string) => Promise<{ ok: boolean; pid: number; log: string }> } }
+    }).__TAURI__
+    if (!tauri) throw new Error("fora do app Tauri")
+    return tauri.core.invoke("game_start")
+  },
   playStatus: () => call<PlayStatus>({ cmd: "play_status" }),
   pickFolder: () => window.__GOW3_PICK_FOLDER__?.() ?? Promise.resolve(null),
   openInExplorer: (path: string) =>

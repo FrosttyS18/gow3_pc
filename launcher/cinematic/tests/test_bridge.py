@@ -163,7 +163,7 @@ class ControlsTests(BridgeFixture):
 
 class PlayTests(BridgeFixture):
     def test_play_refuses_without_game(self):
-        _, response = self.bridge({"cmd": "play"})
+        _, response = self.bridge({"cmd": "prepare_play"})
         self.assertIn("error", response)
         self.assertIn("Pasta do jogo", response["error"])
 
@@ -171,6 +171,59 @@ class PlayTests(BridgeFixture):
         _, status = self.bridge({"cmd": "play_status"})
         self.assertFalse(status["running"])
         self.assertIn("outcome", status)
+
+
+class PersistentWorkerTests(BridgeFixture):
+    """HOTFIX P0: um ÚNICO processo atende N pedidos pelo protocolo de envelopes
+    {'seq','req'} → {'seq','resp'} (modo GOW3_BRIDGE_PERSISTENT=1)."""
+
+    def test_many_requests_over_one_process(self):
+        env = {**self.env, "GOW3_BRIDGE_PERSISTENT": "1", "PYTHONUNBUFFERED": "1"}
+        proc = subprocess.Popen([sys.executable, str(BRIDGE)], stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                env=env, cwd=str(LAUNCHER_DIR))
+        try:
+            answers = []
+            for seq in (1, 2, 3):
+                request = json.dumps({"seq": seq, "req": {"cmd": "set_app",
+                                                          "values": {"ambient_muted": seq == 3}}})
+                proc.stdin.write((request + "\n").encode("utf-8"))
+                proc.stdin.flush()
+                line = proc.stdout.readline().decode("utf-8")
+                envelope = json.loads(line)
+                answers.append((envelope["seq"], envelope["resp"].get("ok")))
+            self.assertEqual([a[0] for a in answers], [1, 2, 3], "seqs casam em ordem")
+            self.assertEqual(answers[0][1], True)
+            # pedido pesado (state inteiro) pela MESMA conexão
+            proc.stdin.write((json.dumps({"seq": 99, "req": {"cmd": "state"}}) + "\n").encode("utf-8"))
+            proc.stdin.flush()
+            envelope = json.loads(proc.stdout.readline().decode("utf-8"))
+            self.assertEqual(envelope["seq"], 99)
+            self.assertIn("version", envelope["resp"])
+            self.assertIn("translations", envelope["resp"])
+        finally:
+            proc.stdin.close()
+            proc.wait(timeout=10)
+        self.assertEqual(proc.returncode, 0, "worker encerra limpo no EOF")
+
+    def test_envelope_with_invalid_json_answers_error_and_survives(self):
+        env = {**self.env, "GOW3_BRIDGE_PERSISTENT": "1"}
+        proc = subprocess.Popen([sys.executable, str(BRIDGE)], stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                env=env, cwd=str(LAUNCHER_DIR))
+        try:
+            proc.stdin.write(b"isto nao e json\n")
+            proc.stdin.flush()
+            envelope = json.loads(proc.stdout.readline().decode("utf-8"))
+            self.assertIn("error", envelope["resp"])
+            proc.stdin.write((json.dumps({"seq": 2, "req": {"cmd": "backups_list"}}) + "\n").encode("utf-8"))
+            proc.stdin.flush()
+            envelope = json.loads(proc.stdout.readline().decode("utf-8"))
+            self.assertEqual(envelope["seq"], 2)
+            self.assertIn("names", envelope["resp"])
+        finally:
+            proc.stdin.close()
+            proc.wait(timeout=10)
 
 
 class ProcessLivenessTests(unittest.TestCase):
