@@ -22,6 +22,24 @@ export default function App() {
   const startedAt = useRef(0)
   const hiddenForPlay = useRef(false)
 
+  // Background cinematográfico em VÍDEO: um único <video> mudo em loop cobre a mesma
+  // área da imagem original (que permanece POR BAIXO como fallback imediato — sem
+  // flash preto: o vídeo só aparece quando pronto, com fade). Pausa quando o jogo
+  // abre (preparando/executando) e retoma ao voltar; a navegação entre páginas não
+  // o remonta (o elemento vive fora do page-host), então ele nunca reinicia à toa.
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const [videoReady, setVideoReady] = useState(false)
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    video.muted = true // propriedade DOM (o atributo do React nem sempre aplica a tempo)
+    if (phase === "preparing" || phase === "running") {
+      video.pause()
+    } else {
+      void video.play().catch(() => { /* autoplay pode ser adiado até interação */ })
+    }
+  }, [phase, videoReady])
+
   const refresh = useCallback(() => {
     bridge.state().then((s) => {
       setState(s)
@@ -126,6 +144,11 @@ export default function App() {
         <div className="art">
           <img src="art/bg-launcher.png" alt="" draggable={false}
             onError={(e) => { (e.target as HTMLImageElement).style.display = "none" }} />
+          <video ref={videoRef} src="art/videolauncher.mp4" loop playsInline preload="auto"
+            aria-hidden="true" tabIndex={-1}
+            className={videoReady ? "bg-video on" : "bg-video"}
+            onCanPlay={() => setVideoReady(true)}
+            onError={() => setVideoReady(false)} />
         </div>
         <TitleBar />
         <div className="logo" aria-label={i18n.t("Play")} role="button" tabIndex={0}

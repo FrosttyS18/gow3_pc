@@ -43,12 +43,26 @@ body { font-family: var(--font); color: var(--text); background: var(--bg); }
 .app { position: relative; height: 100vh; overflow: hidden; }
 
 /* ---- background art --------------------------------------------------------- */
-.art { position: absolute; inset: 0; background: var(--bg); }
+/* A camada de fundo nunca captura cliques: o vídeo e a imagem ficam atrás de toda
+ * a interface (o .art é pointer-events:none; os gradientes ::after continuam por
+ * cima do vídeo, preservando a composição aprovada). */
+.art { position: absolute; inset: 0; background: var(--bg); pointer-events: none; }
 .art img {
   position: absolute; inset: 0; width: 100%; height: 100%;
   object-fit: cover; object-position: center;
   animation: storm 9s ease-in-out infinite;
 }
+/* Vídeo de fundo: mesma área/proporção da imagem (cover = 16:9 sem barras), a
+ * animação storm e os gradientes preservados; invisível até estar pronto (fade —
+ * a imagem por baixo cobre o carregamento, sem flash preto) e SOME em erro,
+ * devolvendo a imagem original como fallback. */
+.art .bg-video {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; object-position: center;
+  animation: storm 9s ease-in-out infinite;
+  opacity: 0; transition: opacity 0.8s ease;
+}
+.art .bg-video.on { opacity: 1; }
 @keyframes storm {
   0%, 100% { filter: brightness(1); }
   46% { filter: brightness(1.02); }
