@@ -53,46 +53,44 @@ export default function App() {
     }
   }, [language, state?.translations, setLanguage])
 
+  // HOTFIX P0: o fim da sessão do jogo chega por EVENTO do Rust (Job Object de sessão
+  // + porta de conclusão do kernel — cobre reinícios internos do port). Nenhum polling:
+  // zero processos e zero consultas enquanto o jogo está aberto. A fase "running" é
+  // apenas estado local (timer), sem tocar em processo algum.
   useEffect(() => {
     if (phase !== "preparing" && phase !== "running") return
-    let failures = 0
-    const timer = setInterval(async () => {
-      try {
-        const status = await bridge.playStatus()
-        failures = 0
-        setBridgeError("")
-        if (status.running) {
-          setPhase(Date.now() - startedAt.current > 6000 ? "running" : "preparing")
-        } else if (status.outcome === "unknown" && Date.now() - startedAt.current < 8000) {
+    const timer = setTimeout(() => setPhase("running"), 6000)
+    return () => clearTimeout(timer)
+  }, [phase])
+
+  useEffect(() => {
+    let disposed = false
+    const off = (window as unknown as {
+      __TAURI__?: { event: { listen: (name: string, handler: (event: { payload: { pid: number; exit_code: number } }) => void) => Promise<() => void> } }
+    }).__TAURI__?.event.listen("gow3://game-end", async (event) => {
+      if (disposed) return
+      const { exit_code: exitCode } = event.payload
+      if (exitCode !== 0) {
+        setPhase("error")
+        const status = await bridge.playStatus().catch(() => null)
+        setPlayError((status?.last_line || "the game ended with an error")
+          + ` (code ${exitCode})`
+          + " — see the Log")
+        window.dispatchEvent(new CustomEvent("gow3:restore-music"))
+      } else {
+        setPhase("idle")
+        if (hiddenForPlay.current) {
+          hiddenForPlay.current = false
+          window.dispatchEvent(new CustomEvent("gow3:restore-music"))
+          await (window as unknown as { __TAURI__?: { window: { getCurrentWindow: () => { close(): Promise<void> } } } })
+            .__TAURI__?.window.getCurrentWindow().close()
           return
-        } else {
-          if (status.outcome === "error") {
-            setPhase("error")
-            setPlayError((status.last_line || "the game ended with an error")
-              + (status.exit_code !== null ? ` (code ${status.exit_code})` : "")
-              + " — see the Log")
-            window.dispatchEvent(new CustomEvent("gow3:restore-music"))
-          } else {
-            setPhase("idle")
-            if (hiddenForPlay.current) {
-              hiddenForPlay.current = false
-              window.dispatchEvent(new CustomEvent("gow3:restore-music"))
-              await (window as unknown as { __TAURI__?: { window: { getCurrentWindow: () => { close(): Promise<void> } } } })
-                .__TAURI__?.window.getCurrentWindow().close()
-              return
-            }
-          }
-          refresh()
-        }
-      } catch (e) {
-        failures += 1
-        if (failures >= 3) {
-          setBridgeError("Failed to track the game: " + String((e as Error).message ?? e))
         }
       }
-    }, 1500)
-    return () => clearInterval(timer)
-  }, [phase, refresh])
+      refresh()
+    })
+    return () => { disposed = true; void off?.then((unlisten) => unlisten()) }
+  }, [refresh])
 
   const toggleMusic = () => {
     const next = !musicMuted
