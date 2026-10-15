@@ -43,19 +43,20 @@ export function DisplayPage({ state, refresh }: P) {
 /* ---------- Gráficos experimentais (build_graphics) — upscaling temporal estacionado pela v2.2.0 do motor ---------- */
 export function GraphicsPage({ state }: P) {
   const { t } = useI18n()
+  const pt = t("Play") === "Jogar"
   return (
     <div className="settings">
-      <h1>{t("Play") === "Jogar" ? "Gráficos" : "Graphics"}</h1>
-      <Section title={t("Play") === "Jogar" ? "Upscaling (estacionado)" : "Upscaling (parked)"}>
+      <h1>{pt ? "Gráficos" : "Graphics"}</h1>
+      <Section title={pt ? "Upscaling (estacionado)" : "Upscaling (parked)"}>
         <p className="page-intro">
-          O upscaling temporal (FSR 3.1, TAA) foi estacionado pelo motor na versão 2.2.0: ainda não está
-          calibrado para este jogo e permanece desligado em toda partida. Não há o que configurar aqui
-          enquanto o recurso não voltar.
+          {pt
+            ? "O upscaling temporal (FSR 3.1, TAA) foi estacionado pelo motor na versão 2.2.0: ainda não está calibrado para este jogo e permanece desligado em toda partida. Não há o que configurar aqui enquanto o recurso não voltar."
+            : "Temporal upscaling (FSR 3.1, TAA) is parked by the engine as of version 2.2.0: it is not calibrated for this game yet and stays off in every session. There is nothing to configure here until the feature returns."}
         </p>
         <p className="field-hint">
-          A preferência salva antes da 2.2.0 (upscaler {state.ini.upscaler ?? "—"}) é preservada no
-          gow3.ini e voltará a valer automaticamente se o motor reativar o recurso. Nada é regravado
-          pelo launcher.
+          {pt
+            ? `A preferência salva antes da 2.2.0 (upscaler ${state.ini.upscaler ?? "—"}) é preservada no gow3.ini e voltará a valer automaticamente se o motor reativar o recurso. Nada é regravado pelo launcher.`
+            : `The preference saved before 2.2.0 (upscaler ${state.ini.upscaler ?? "—"}) is preserved in gow3.ini and takes effect again automatically if the engine re-enables the feature. Nothing is rewritten by the launcher.`}
         </p>
       </Section>
     </div>
@@ -352,7 +353,7 @@ export function ControlsPage({ state, refresh }: P) {
       <h1>{t("Play") === "Jogar" ? "Controles" : "Controls"}</h1>
       {error && <p className="op-error">{error}</p>}
       <p className="page-intro">Qual tecla ou botão do controle aperta cada botão do jogo.</p>
-      <Section title={t("Play") === "Jogar" ? "Mapeamento" : "Mapping"}>
+      <Section title={t("Play") === "Jogar" ? "Nomes dos botões" : "Button names"}>
         <span className="inline-row">
           {(["playstation", "xbox"] as const).map((s) => (
             <label key={s} className={"radio" + (style === s ? " on" : "")}>
@@ -362,7 +363,9 @@ export function ControlsPage({ state, refresh }: P) {
           ))}
         </span>
         <Field label={t("Play") === "Jogar" ? "Ícones de botões no jogo" : "In-game button icons"}
-               hint="Substitui os ícones de botão de PlayStation dentro do jogo pelos do seu controle. Funciona numa cópia de dois arquivos do jogo (cerca de 70 MB) na pasta de dados do port — a pasta do jogo nunca é alterada. Aplicado ao iniciar o jogo.">
+               hint={t("Play") === "Jogar"
+                 ? "Substitui os ícones de botão de PlayStation dentro do jogo pelos do seu controle. Funciona numa cópia de dois arquivos do jogo (cerca de 70 MB) na pasta de dados do port — a pasta do jogo nunca é alterada. Aplicado ao iniciar o jogo."
+                 : "Replaces the PlayStation button icons inside the game with your controller's. Works on a copy of two game files (about 70 MB) in the port's data folder — your game folder is never changed. Applied when the game starts."}>
           <Dropdown value={String(state.app.glyph_style ?? "off")} choices={state.choices.glyph_style ?? []}
             onChange={(v) => run(() => bridge.setApp({ glyph_style: v }))}
             label={t("Play") === "Jogar" ? "Ícones de botões no jogo" : "In-game button icons"} />

@@ -220,6 +220,8 @@ def run_tests(cdp):
     controls_text = open_page(cdp, 6) or ""
     check("Controles oferece Ícones de botões no jogo (glyph_style)",
           "ícones de botões no jogo" in controls_text.lower(), controls_text[:120])
+    check("Controles sem títulos de seção duplicados (Mapeamento 1×)",
+          controls_text.lower().count("mapeamento") == 1, controls_text[:160])
     go_home(cdp)
 
     # ===== 2. HOOKS, CONSOLE E EXCEÇÕES (FALHA C) =====
@@ -297,6 +299,27 @@ def run_tests(cdp):
           f"itens en encontrados: {[t for t in nav_pt[:9] if t in ('Display','Performance','Advanced','Log')]}")
 
 
+def en_checks(cdp):
+    """Segundo ciclo (ui_language=en): os textos NOVOS da v2.2.0 (Gráficos estacionado,
+    ícones de botões) precisam estar em inglês — sem português fixo."""
+    print("\n== IDIOMA EN (relançado com ui_language=en) ==")
+    nav = cdp.eval("[...document.querySelectorAll('.nav > button')].map(b=>b.textContent.trim())")
+    check("menu em EN (Display presente)", any(t == "Display" for t in nav), f"nav: {nav[:4]}")
+    go_home(cdp)
+    graphics_text = open_page(cdp, 1) or ""
+    check("Gráficos em EN informa 'parked' (sem pt fixo)",
+          "parked" in graphics_text.lower() and "estacionado" not in graphics_text.lower(),
+          graphics_text[:160])
+    go_home(cdp)
+    controls_text = open_page(cdp, 6) or ""
+    check("Controles em EN mostra 'In-game button icons' (sem pt fixo)",
+          "in-game button icons" in controls_text.lower()
+          and "ícones de botões no jogo" not in controls_text.lower(), controls_text[:160])
+    check("Controles em EN sem títulos duplicados (Mapping 1×)",
+          controls_text.lower().count("mapping") == 1, controls_text[:160])
+    go_home(cdp)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--exe", default=str(Path(__file__).resolve().parents[1] /
@@ -342,6 +365,28 @@ def main():
             print("FALHA: interface não ficou pronta em 30s")
             sys.exit(1)
         run_tests(cdp)
+        cdp.close()
+        # segundo ciclo: relançar com ui_language=en (textos novos da v2.2.0 em inglês)
+        proc.terminate()
+        proc.wait(timeout=15)
+        time.sleep(2.5)  # WebView2 não tolera relançamento imediato após kill (0x8007139F)
+        (home / "appdata" / "gow3-launcher" / "settings.json").write_text(
+            json.dumps({"ui_language": "en", "ambient_muted": False}), encoding="utf-8")
+        proc = subprocess.Popen([args.exe], env=env, cwd=Path(args.exe).parent)
+        cdp = None
+        for i in range(60):
+            if proc.poll() is not None:
+                print(f"FALHA: exe terminou com código {proc.returncode} antes de abrir CDP (ciclo en)")
+                sys.exit(1)
+            try:
+                cdp = CDP()
+                break
+            except (urllib.error.URLError, Exception):
+                time.sleep(0.25)
+        if not cdp or not wait_ready(cdp):
+            print("FALHA: ciclo EN não ficou pronto")
+            sys.exit(1)
+        en_checks(cdp)
         cdp.close()
     finally:
         proc.terminate()
