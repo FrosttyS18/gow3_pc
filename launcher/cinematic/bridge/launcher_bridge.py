@@ -162,6 +162,7 @@ def all_choices(app: dict) -> dict:
         "ui_language": choice_labels(L.UI_LANGUAGES),
         "video_backend": choice_labels(L.VIDEO_BACKENDS),
         "glyph_style": choice_labels(L.GLYPH_STYLES),
+        "anisotropy": choice_labels(L.ANISOTROPY),
         "gpu_id": [{"value": "", "label": "Automático"}] + [
             {"value": row[0], "label": row[1]} for row in gpus],
         "no_msaa": choice_labels(L.no_msaa_options(gpus, app.get("gpu_id", ""))),
@@ -529,6 +530,12 @@ def prepare_play() -> dict:
         command = L.run_command()
         cwd = str(L.PORT_DIR)
         env = L.game_environment(app)
+    # Discord Rich Presence: decisão DEFINITIVA do mantenedor — desativado neste
+    # launcher EM TODA partida, mesmo que um settings.json legado traga
+    # discord_rpc=true (a preferência NÃO é apagada nem reescrita; só o ambiente
+    # desta sessão é forçado — o discord_presence.py OFICIAL se autodesativa
+    # com GOW3_DISCORD='0', sem tocar em arquivo oficial).
+    env["GOW3_DISCORD"] = "0"
     exit_file = RUN_PID.with_name("gow3-cinematic-run.exit")
     for stale in (RUN_PID, exit_file):
         try:

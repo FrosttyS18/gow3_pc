@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { BridgeState, bridge } from "../bridge"
 import { useI18n } from "../i18n"
-import { ActionButton, Dropdown, Field, PathField, Section, Toggle, pickFolderAndSet, useSaver } from "./inputs"
+import { ActionButton, Dropdown, Field, PathField, Section, Slider, Toggle, pickFolderAndSet, useSaver } from "./inputs"
 
 type P = { state: BridgeState; refresh: () => void }
 
@@ -41,12 +41,25 @@ export function DisplayPage({ state, refresh }: P) {
 }
 
 /* ---------- Gráficos experimentais (build_graphics) — upscaling temporal estacionado pela v2.2.0 do motor ---------- */
-export function GraphicsPage({ state }: P) {
+export function GraphicsPage({ state, refresh }: P) {
   const { t } = useI18n()
   const pt = t("Play") === "Jogar"
+  const { run, error } = useSaver(refresh)
+  const ini = state.ini
   return (
     <div className="settings">
       <h1>{pt ? "Gráficos" : "Graphics"}</h1>
+      {error && <p className="op-error">{error}</p>}
+      <Section title={pt ? "Filtragem anisotrópica" : "Anisotropic filtering"}>
+        <Field label={pt ? "Filtragem anisotrópica" : "Anisotropic filtering"}
+               hint={pt
+                 ? "Nitidez das texturas vistas em ângulo (piso, paredes). 16× é a mais nítida; o padrão do jogo é desligado."
+                 : "Sharpness of textures viewed at an angle (floors, walls). 16x is the sharpest; the game default is off."}>
+          <Dropdown value={ini.anisotropy ?? "0"} choices={state.choices.anisotropy ?? []}
+            onChange={(v) => run(() => bridge.setIni({ anisotropy: v }))}
+            label={pt ? "Filtragem anisotrópica" : "Anisotropic filtering"} />
+        </Field>
+      </Section>
       <Section title={pt ? "Upscaling (estacionado)" : "Upscaling (parked)"}>
         <p className="page-intro">
           {pt
@@ -369,6 +382,15 @@ export function ControlsPage({ state, refresh }: P) {
           <Dropdown value={String(state.app.glyph_style ?? "off")} choices={state.choices.glyph_style ?? []}
             onChange={(v) => run(() => bridge.setApp({ glyph_style: v }))}
             label={t("Play") === "Jogar" ? "Ícones de botões no jogo" : "In-game button icons"} />
+        </Field>
+        <Field label={t("Play") === "Jogar" ? "Vibração do controle" : "Gamepad vibration"}
+               hint={t("Play") === "Jogar"
+                 ? "Intensidade da vibração do controle; 0% desliga."
+                 : "Strength of the gamepad's vibration; 0% turns it off."}>
+          <Slider value={Number(state.ini.vibration ?? "100")} min={0} max={100} step={1}
+            label={t("Play") === "Jogar" ? "Vibração do controle" : "Gamepad vibration"}
+            format={(v) => `${v}%`}
+            onCommit={(v) => run(() => bridge.setIni({ vibration: String(v) }))} />
         </Field>
       </Section>
       <Section title={t("Play") === "Jogar" ? "Mapeamento" : "Mapping"}>

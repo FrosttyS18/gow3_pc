@@ -33,8 +33,12 @@ import webbrowser
 import zipfile
 
 WINDOWS = sys.platform == 'win32'
+# Windows without a cursor of their own show the X root window's, which XWayland leaves blank.
+ARROW = '' if WINDOWS else 'left_ptr'
 if WINDOWS:
     import ctypes
+    # AMD hybrid laptops: this layer hides the NVIDIA GPU from Vulkan and the game stays black (#263).
+    os.environ.setdefault('VK_LOADER_LAYERS_DISABLE', 'VK_LAYER_AMD_switchable_graphics')
 FROZEN = getattr(sys, 'frozen', False)
 PORT_DIR = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PORT_DIR / 'scripts'))
@@ -54,7 +58,7 @@ NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 NEW_GROUP = {} if WINDOWS else {'start_new_session': True}
 UI_FONT, MONO_FONT, SERIF_FONT = 'Segoe UI', 'Consolas', 'Georgia'
 # This build; GitHub release tags are windows-v<VERSION>.
-VERSION = '2.2.0'
+VERSION = '2.3.0'
 RELEASES_API = 'https://api.github.com/repos/FelipePrado0/gow3_pc/releases/latest'
 RELEASES_PAGE = 'https://github.com/FelipePrado0/gow3_pc/releases/latest'
 UPDATE_DIR = Path(tempfile.gettempdir()) / 'gow3-update'
@@ -143,7 +147,7 @@ def no_msaa_options(gpus, gpu_id):
 
 def list_gpus():
     """The Vulkan GPUs in the order the game numbers them, or [] when the tool cannot tell."""
-    tool = find_tool('gow3-gpu-capabilities.exe')
+    tool = find_tool('gow3-gpu-capabilities' + ('.exe' if WINDOWS else ''))
     if not tool:
         return []
     try:
@@ -296,8 +300,10 @@ INI_DEFAULTS = {'upscaler': 'fsr3', 'preset': '1',
                 'live_resolution': 'auto', 'display_mode': 'windowed', 'vsync': '1', 'fps_limit': '0',
                 'async_shaders': '1', 'deferred_readback': '1', 'stale_readback': '1',
                 'render_resolution': 'native', 'engine_fps': '120',
-                'frames_queued': '1', 'cheat_very_hard': '0', 'cheat_double_jumps': '0'}
+                'frames_queued': '1', 'cheat_very_hard': '0', 'cheat_double_jumps': '0',
+                'anisotropy': '0', 'vibration': '100'}
 DISPLAY_MODES = [('windowed', ('Windowed',)), ('borderless', ('Borderless',)), ('fullscreen', ('Fullscreen',))]
+ANISOTROPY = [('0', ('Game default',)), ('2', ('2x',)), ('4', ('4x',)), ('8', ('8x',)), ('16', ('16x',))]
 FPS_LIMITS = [('30', ('30',)), ('60', ('60',)), ('120', ('120',)), ('240', ('240',)), ('0', ('Unlimited',))]
 # The sidebar's pages, top to bottom, and the methods that refresh a page's lists when it is shown.
 PAGES = ('home', 'graphics', 'performance', 'game', 'advanced')
@@ -305,10 +311,10 @@ PAGE_REFRESH = {'home': ('refresh_status',), 'game': ('refresh_lists', 'refresh_
 APP_DEFAULTS = {'ui_language': 'en', 'game_dir': os.environ.get('GOW3_GAME_DIR', str(PORT_DIR.parent / 'CUSA01623') if WINDOWS else ''), 'update_dir': '', 'experimental_upscaler': False,
                 'video_backend': 'auto', 'gamemode': False, 'mangohud': False, 'desktop_integration': True, 'user_dir': '',
                 'mods_dir': '', 'mods_enabled': True, 'patches_dir': '', 'language': '1',
-                'player_name': '', 'hdr': False, 'draw_pipe': '', 'readbacks': '', 'no_msaa': '', 'stream_memory': 'cached',
+                'hdr': False, 'draw_pipe': '', 'readbacks': '', 'no_msaa': '', 'stream_memory': 'cached',
                 'gpu_id': '', 'background_warmup': True, 'parallel_warmup': True, 'pipeline_binary_cache': True,
                 'perf_diag': False, 'frame_capture_key': False, 'frame_stats': False, 'gpu_profile': False,
-                'vk_validation': False, 'close_on_play': False,
+                'vk_validation': False, 'close_on_play': False, 'discord_rpc': False,
                 'check_updates': False, 'game_patches': {}, 'controls': {}, 'pad_style': 'playstation',
                 'glyph_style': 'off'}
 
@@ -732,8 +738,7 @@ def game_environment(s):
     env['GOW3_PATCHES_DIR'] = s['patches_dir'] or str(DATA_DIR / 'patches')
     env['GOW3_PATCHES_CONFIG'] = str(DATA_DIR / 'patches.json')
     env['GOW3_LANGUAGE'] = s['language']
-    if str(s['player_name']).strip():
-        env['GOW3_USER_NAME'] = str(s['player_name']).strip()
+    env['GOW3_DISCORD'] = '1' if s.get('discord_rpc') else '0'
     if s['hdr']:
         env['GOW3_HDR'] = '1'
     for key, name in (('draw_pipe', 'GOW3_DRAW_PIPE'), ('readbacks', 'GOW3_READBACKS'), ('no_msaa', 'GOW3_NO_MSAA')):
@@ -1073,7 +1078,8 @@ class Launcher:
         self.side_note = tk.Label(side, text=_('In the game: Insert or R3+L2\nopens the port\'s menu.',
                                                'В игре: Insert или R3+L2\nоткрывает меню порта.'),
                                   bg=BG, fg=MUTED, font=(UI_FONT, 9), justify='left', wraplength=self.px(210))
-        self.side_note.pack(anchor='w', padx=22, pady=(0, 18))
+        self.side_note.pack(anchor='w', padx=22, pady=(0, 4))
+        tk.Label(side, text=f'v{VERSION}', bg=BG, fg=MUTED, font=(UI_FONT, 9)).pack(anchor='w', padx=22, pady=(0, 18))
 
         right = tk.Frame(self.root, bg=PANEL)
         right.pack(side='left', fill='both', expand=True)
@@ -1096,13 +1102,16 @@ class Launcher:
         self.build_game()
         self.build_advanced()
         self.root.bind_all('<MouseWheel>', self.wheel)
+        if not WINDOWS:  # X11 (Tk 8.6): the wheel arrives as buttons 4 and 5; on Windows those are side buttons
+            self.root.bind_all('<Button-4>', self.wheel)
+            self.root.bind_all('<Button-5>', self.wheel)
         self.game_changed()
 
     def wheel(self, event):
         page = self.pages.get(self.current_page)
         if hasattr(page, 'scroll') and not isinstance(event.widget, (self.tk.Text, self.ttk.Combobox)) \
                 and 'popdown' not in str(event.widget):
-            page.scroll(int(-event.delta / 120))
+            page.scroll({4: -1, 5: 1}.get(event.num) or int(-event.delta / 120))
 
     def show(self, name):
         for page in self.pages.values():
@@ -1218,9 +1227,19 @@ class Launcher:
         self.check(f, 'hdr', 'app', _('Allow HDR output', 'Разрешить HDR'),
                    _('When HDR is on in Windows and the display supports it.',
                      'Если HDR включён в Windows и монитор его поддерживает.'))
+        self.section(f, _('Textures'))
+        self.row(f, _('Anisotropic filtering'), self.choice(f, 'anisotropy', 'ini', ANISOTROPY),
+                 _('Sharper floors and walls seen at an angle, at little cost on most graphics cards.'),
+                 restart=True)
         self.section(f, _('Overlay'))
         self.check(f, 'show_fps', 'ini', _('Show performance overlay'),
                    _('Items, size and corner: in-game menu (Insert / R3+L2) > Overlay.'))
+        self.section(f, _('Screenshots'))
+        shots = self.ttk.Button(f, text=_('Open the screenshots folder'),
+                           command=lambda: self.open_path(
+                               Path(self.var('user_dir', 'app').get() or DATA_DIR / 'user') / 'screenshots'))
+        self.row(f, _('F12 in the game'), shots,
+                 _("Saves the game's image, without the overlay, as a PNG in the screenshots folder of the saves."))
 
     def build_performance(self):
         f = self.scrolled_page('performance', _('Performance'), _('Frame rate and speed options.'))
@@ -1435,6 +1454,17 @@ class Launcher:
                  hint=_('Replaces the PlayStation button icons inside the game with the ones of your controller. '
                         'Works on a copy of two game files in the port\'s data folder (about 70 MB); your game folder '
                         'is never changed. Applied when the game starts.'))
+        holder = ttk.Frame(f)
+        strength = self.var('vibration', 'ini')
+        tk.Scale(holder, from_=0, to=100, orient='horizontal', variable=strength, showvalue=False, length=self.px(260),
+                 width=self.px(12), sliderlength=self.px(18), bg=ACCENT, troughcolor=CARD, activebackground=ACCENT_HI,
+                 highlightthickness=0, bd=0, sliderrelief='flat').pack(side='left')
+        value = ttk.Label(holder, width=5)
+        value.pack(side='left', padx=10)
+        show = lambda *_a: value.configure(text=f'{strength.get()}%')
+        strength.trace_add('write', show)
+        show()
+        self.row(f, _('Vibration'), holder, _("Strength of the gamepad's vibration; 0% turns it off."))
         table = ttk.Frame(f)
         table.grid(row=self.next_row(f), column=0, columnspan=2, sticky='w', pady=(16, 0))
         for column, span, title in ((0, 2, _('GAME BUTTON')), (2, 1, _('KEYBOARD')), (3, 2, _('GAMEPAD'))):
@@ -1532,6 +1562,9 @@ class Launcher:
         self.section(f, _('Launcher', 'Лаунчер'), top=4)
         self.row(f, _('Launcher language', 'Язык лаунчера'), self.choice(f, 'ui_language', 'app', UI_LANGUAGES),
                  _('Applies when the launcher opens again.', 'Применится при следующем открытии лаунчера.'))
+        self.check(f, 'discord_rpc', 'app', _('Show Discord Rich Presence', 'Показывать Discord Rich Presence'),
+                   _('Shows only the game name and the time played on your Discord profile.',
+                     'Показывает в профиле Discord только название игры и время в игре.'))
         self.check(f, 'close_on_play', 'app', _('Close the launcher when the game starts', 'Закрывать лаунчер при запуске игры'))
         if WINDOWS:
             self.check(f, 'check_updates', 'app', _('Check for updates when the launcher opens',
@@ -1938,6 +1971,7 @@ class Launcher:
             self.show('game')
             return
         self.set_log('')
+        self.exit_hint = None
         # The same last_run.log as --play, so a report from the PLAY button has the file too.
         run_log = open_play_log(self.app)
         try:
@@ -1983,11 +2017,14 @@ class Launcher:
                 item = self.output.get_nowait()
                 if isinstance(item, tuple):
                     self.append(_('\nThe game exited (code {}).\n', '\nИгра завершилась (код {}).\n').format(item[0]))
+                    if getattr(self, 'exit_hint', None):
+                        self.append(self.exit_hint + '\n')
                     self.process = None
                     if self.job:
                         self.job.close()
                     self.refresh_status()
                 else:
+                    self.exit_hint = exit_hint(item) or getattr(self, 'exit_hint', None)
                     if 'Entering original x86-64 code' in item:
                         self.status.configure(text=_('The game is running.', 'Игра запущена.'), fg=TEXT)
                     elif 'restarting through run.py' in item:
@@ -2222,7 +2259,7 @@ class Launcher:
                       'and logo. Open Steam to see it in the library.'))
             self.messagebox.showinfo(APP_NAME, text.format(steam_shortcut.APP_NAME, result['accounts']))
         finally:
-            self.root.configure(cursor='')
+            self.root.configure(cursor=ARROW)
 
     def close(self):
         if not self.collect():
@@ -2302,6 +2339,21 @@ def open_play_log(settings):
     if settings.get('close_on_play'):
         return _NullLog()
     return open_run_log(settings)
+
+
+def exit_hint(line):
+    """Advice for an output line that explains why the game closed, or None."""
+    if 'of guest memory (error ' in line:
+        return _('Windows could not reserve the memory the game needs. Close other programs, or let the '
+                 'Windows page file grow (for example 16384 MB initial, 32768 MB maximum), and start again.',
+                 'Windows не смог выделить память для игры. Закройте другие программы или дайте файлу '
+                 'подкачки Windows расти (например, 16384 МБ исходный, 32768 МБ максимальный) и запустите снова.')
+    if 'guest raised debug exception code=0xa0020001' in line:
+        return _('The game stopped while reading its files: the game dump may be incomplete. Extract the pkg '
+                 'again and check that the game folder is about 40 GB.',
+                 'Игра остановилась при чтении своих файлов: дамп игры может быть неполным. Распакуйте pkg '
+                 'заново и проверьте, что папка игры занимает около 40 ГБ.')
+    return None
 
 
 def _close_quietly(log):
@@ -2398,6 +2450,10 @@ def main():
     import tkinter as tk
     from tkinter import filedialog, font, messagebox, ttk
     root = tk.Tk() if WINDOWS else tk.Tk(className='gow3')
+    if not WINDOWS:
+        root.configure(cursor=ARROW)
+        for window in ('Toplevel', 'Dialog', 'TkFDialog', 'TkChooseDir'):  # dialogs: tk_messageBox, file pickers
+            root.option_add(f'*{window}.cursor', ARROW)
     pick_fonts(font.families(root))
     Launcher(root, tk, ttk, filedialog, messagebox)
     root.mainloop()

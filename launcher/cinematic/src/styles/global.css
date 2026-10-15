@@ -236,6 +236,29 @@ body { font-family: var(--font); color: var(--text); background: var(--bg); }
 }
 .version { color: var(--muted); font-size: 12.5px; }
 
+/* ---- SLIDER (design system; componente Slider em inputs.tsx) --------------------
+ * Trilha vermelha #9F0000 sobre base escura, thumb #9F0000 com aro branco — tokens
+ * dos sliders aprovados. Preenchimento via --fill atualizado inline pelo componente. */
+.slider-row { display: inline-flex; align-items: center; gap: 10px; }
+input[type="range"].slider {
+  -webkit-appearance: none; appearance: none;
+  width: 208px; height: 4px; border-radius: 2px;
+  background: #2a1214; outline: none; cursor: pointer;
+}
+input[type="range"].slider:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+input[type="range"].slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 15px; height: 15px; border-radius: 50%;
+  background: #9F0000; border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+input[type="range"].slider::-moz-range-thumb {
+  width: 15px; height: 15px; border-radius: 50%;
+  background: #9F0000; border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+.slider-value { min-width: 44px; font-size: 13px; color: var(--muted); text-align: right; }
+
 /* ---- TOGGLE: respiro interno >= 2px em todos os lados (720p) --------------------
  * Nominal Figma: knob 28.37 => respiro vertical de apenas 1.5px em 720p (o "encostando"
  * visto pelo mantenedor). Knob ajustado para 27px (desvio registrado: -1.37px) com
