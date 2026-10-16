@@ -148,6 +148,42 @@ fn worker_slot() -> &'static Mutex<WorkerSlot> {
     }))
 }
 
+/// Interpretador do worker, na ordem: `GOW3_CINEMATIC_PYTHON` (env, casos especiais)
+/// → `runtime\python\python.exe` nos ancestrais do executável (distribuição: o runtime
+/// PRIVADO tem prioridade absoluta sobre qualquer Python global) → `python` SOMENTE
+/// quando a ponte for encontrada em uma árvore de DESENVOLVIMENTO. Em distribuição sem
+/// o runtime privado: erro EXPLÍCITO — nunca o Python do usuário silenciosamente.
+fn python_executable() -> Result<String, String> {
+    let exe = std::env::current_exe().ok();
+    python_executable_from(exe.as_deref(), bridge_path().is_ok())
+}
+
+fn python_executable_from(exe: Option<&Path>, dev_tree: bool) -> Result<String, String> {
+    if let Ok(from_env) = std::env::var("GOW3_CINEMATIC_PYTHON") {
+        if PathBuf::from(&from_env).is_file() {
+            return Ok(from_env);
+        }
+        return Err(format!(
+            "GOW3_CINEMATIC_PYTHON aponta para um arquivo inexistente: {from_env}"));
+    }
+    if let Some(exe) = exe {
+        for root in exe.ancestors() {
+            let candidate = root.join("runtime").join("python").join("python.exe");
+            if candidate.is_file() {
+                return Ok(candidate.to_string_lossy().into_owned());
+            }
+        }
+    }
+    // sem runtime privado: só usa o Python do ambiente em árvore de DESENVOLVIMENTO
+    // (ponte encontrada pela mesma varredura de bridge_path)
+    if dev_tree {
+        return Ok("python".into());
+    }
+    Err("runtime Python privado não encontrado (runtime\\python\\python.exe) e esta não é \
+         uma árvore de desenvolvimento — instale novamente ou defina \
+         GOW3_CINEMATIC_PYTHON".into())
+}
+
 fn spawn_worker(slot_generation: u64, stderr_tail: &Arc<Mutex<String>>)
                 -> Result<WorkerHandle, String> {
     let bridge = bridge_path()?;
@@ -156,7 +192,7 @@ fn spawn_worker(slot_generation: u64, stderr_tail: &Arc<Mutex<String>>)
         .nth(3)
         .ok_or("port directory not resolvable")?
         .to_path_buf();
-    let mut child = Command::new("python")
+    let mut child = Command::new(python_executable()?)
         .arg(&bridge)
         .current_dir(port_dir)
         .env("PYTHONIOENCODING", "utf-8")
@@ -1301,5 +1337,37 @@ mod p0_tests {
                 "valor com '=' e espaços intacto");
         assert_eq!(*block.last().unwrap(), 0, "bloco termina em NUL duplo");
         assert_eq!(block[block.len() - 2], 0, "a última entrada também termina em NUL");
+    }
+}
+
+#[cfg(test)]
+mod dist_tests {
+    use super::*;
+
+    /// Runtime PRIVADO nos ancestrais do exe tem prioridade absoluta (mesmo com Python
+    /// global no PATH). Simulado com diretório temporário + arquivo python.exe falso.
+    #[test]
+    fn private_runtime_wins_over_global_python() {
+        let dir = std::env::temp_dir().join(format!("gow3-dist-{}-1", std::process::id()));
+        let runtime = dir.join("runtime").join("python");
+        std::fs::create_dir_all(&runtime).unwrap();
+        std::fs::write(runtime.join("python.exe"), b"MZ fake").unwrap();
+        let exe = dir.join("app").join("gow3-cinematic.exe");
+        let resolved = python_executable_from(Some(exe.as_path()), false).unwrap();
+        assert!(resolved.contains("runtime"), "deve usar o runtime privado: {resolved}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Sem runtime privado e SEM ponte (não é dev): erro EXPLÍCITO, nunca "python".
+    #[test]
+    fn missing_runtime_in_distribution_is_explicit_error() {
+        let empty = std::env::temp_dir().join(format!("gow3-dist-empty-{}", std::process::id()));
+        std::fs::create_dir_all(&empty).unwrap();
+        let exe = empty.join("gow3-cinematic.exe");
+        let result = python_executable_from(Some(exe.as_path()), false);
+        assert!(result.is_err(), "sem runtime e sem dev tree deve ser erro: {result:?}");
+        assert!(result.unwrap_err().contains("runtime Python privado"),
+                "mensagem deve ser explícita sobre o runtime");
+        std::fs::remove_dir_all(&empty).ok();
     }
 }
