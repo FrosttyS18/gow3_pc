@@ -13,15 +13,22 @@ Documento próprio do fork (2026-10-15). Separa explicitamente as três versões
 Instalação **por usuário, autônoma, sem Python/Rust/Node/MSYS2/Git na máquina**:
 
 ```
-%LOCALAPPDATA%\gow3-cinematic\            (gravável — sem exigir admin)
+%LOCALAPPDATA%\gow3-cinematic\            (gravável — sem exigir admin; raiz técnica do port)
 ├── gow3-cinematic.exe                    app Tauri (frontend embutido)
-├── bridge\launcher_bridge.py             ponte (worker persistente)
+├── launcher\cinematic\bridge\launcher_bridge.py   ponte (worker persistente)
+│   └── public\art\                       música/arte autorizados (NÃO embutidos no exe)
 ├── launcher\gow3_launcher_win.py, gow3_lang.py, gow3_vulkan.py, gow3.ico, gow3.png, gowfont.ttf
-├── runtime\python\                       python embeddable + Pillow (PRIVADO do launcher)
+├── runtime\python\                       python embeddable + Pillow + iced_x86 (PRIVADO)
 ├── run.py, scripts\, patches\            preparo/execução oficiais do port (intocados)
 ├── bin\gow3-probe.exe, gow3-gpu-capabilities.exe, *.dll   (DLLs CLANG64 via ldd)
-└── data\ …                               user/, out/, gow3.ini, mods/, caches (GRAVÁVEL)
+└── user\, out\, gow3.ini, mods\ …        dados graváveis do usuário (DENTRO da raiz)
 ```
+
+A hierarquia `launcher/cinematic/bridge` é PRESERVADA intacta: os caminhos relativos
+existentes continuam válidos SEM qualquer mudança no backend — o Python resolve
+`Path(__file__).resolve().parents[2]` (→ `launcher/`) e o Rust `bridge.ancestors().nth(3)`
+(→ raiz da instalação), ambos naturalmente neste layout. Nenhum fallback novo para a
+ponte é necessário; `GOW3_CINEMATIC_BRIDGE` (env) continua disponível para casos especiais.
 
 A pasta do JOGO permanece externa, escolhida pelo usuário e persistida em
 `settings.json` — o instalador NUNCA a toca e NUNCA inclui `eboot.bin`, `sce_module`,
@@ -34,10 +41,13 @@ A pasta do JOGO permanece externa, escolhida pelo usuário e persistida em
   `media-src 'self' data: blob:`). Requer **WebView2 Runtime** — o bundle NSIS do Tauri
   anexa o bootstrapper oficial (baixa/instala se ausente; já configurado em
   `tauri.conf.json` → `bundle.targets: ["nsis"]`).
-- **Python**: única dependência de terceiros da ponte/run.py/scripts é **Pillow**
-  (`PIL` — glyphs, ícones; conferido por inspeção de imports). Runtime privado =
-  "Windows embeddable Python 3.12" (~11 MB) + `pip install pillow` na imagem, com
-  `python312._pth` liberando `site-packages` e apontando `..` para a árvore do launcher.
+- **Python**: dependências de terceiros verificadas = **Pillow** (`PIL` — glyphs,
+  ícones, screenshots) e **iced_x86** (desmontagem — referência de compatibilidade do
+  empacotamento oficial, que a inclui como hidden import). Runtime privado =
+  "Windows embeddable Python 3.12" (~11 MB; distribuição SEM pip/ensurepip) + wheels
+  de Pillow e iced_x86 desempacotados em `runtime\python\site-packages\`, com
+  `python312._pth` importando `site-packages` e a raiz da instalação (módulos oficiais
+  e ponte).
 - **Binários nativos do port**: `gow3-probe.exe`, `gow3-gpu-capabilities.exe`
   (`gow3-play.exe` é do fluxo Tk, não usado pela ponte) + TODAS as DLLs que carregam da
   toolchain CLANG64 (SDL3, FFmpeg, loader Vulkan etc.) — enumerar com `ldd` exatamente
@@ -45,20 +55,26 @@ A pasta do JOGO permanece externa, escolhida pelo usuário e persistida em
 - **Recursos oficiais**: `run.py`, `scripts/` (inclui `discord_presence.py` e
   `guest_memory.py` — blob-idênticos; Discord permanece DESATIVADO por design),
   `patches/`, `launcher/` (módulos Python do port, fonte, ícones).
+- **Mídia embutida vs. em disco**: o vídeo, a imagem de fallback e o logo são EMBUTIDOS
+  no exe Tauri (frontendDist) e funcionam sempre. A MÚSICA não é embutida:
+  `music_state()` procura o padrão em `<DATA_DIR>/launcher/cinematic/public/art/` (e o
+  seletor persiste `ambient_file` em settings.json) — o estágio inclui o MP3 autorizado
+  em `launcher/cinematic/public/art/`.
 - **Arte do mantenedor** (`public/art/`: fundo/logo/mp3/videolauncher.mp4): GITIGNORED —
   incluir no instalador **exige autorização de redistribuição** (decisão pendente do
-  mantenedor; sem ela, o instalador usa fallback visual embutido).
+  mantenedor; sem ela, o instalador usa fallback visual embutido e vem sem música).
 
 ## 3. Bloqueios técnicos atuais (a resolver ANTES do instalador)
 
-1. **`Command::new("python")` em `lib.rs`** (worker e worker morto/renascimento): assume
-   Python no PATH. Resolver: variável de resolução `GOW3_CINEMATIC_PYTHON` com fallback
-   `<exe_dir>\runtime\python\python.exe` → `python` (dev). Protocolo stdin/stdout
-   persistente INALTERADO.
-2. **`bridge_path()` caminha a árvore de código-fonte**: hoje acha
-   `launcher/cinematic/bridge/launcher_bridge.py` pelos ancestrais do exe (ou
-   `GOW3_CINEMATIC_BRIDGE`). Resolver: fallback adicional `<exe_dir>\bridge\launcher_bridge.py`
-   antes da varredura (layout instalado) — mantém o comportamento dev.
+1. **`Command::new("python")` em `lib.rs`**: assume Python no PATH. Resolvido no PR de
+   código `fix/dist-runtime`: ordem `GOW3_CINEMATIC_PYTHON` (env) →
+   `runtime\python\python.exe` nos ancestrais do exe (PRIORIDADE sobre qualquer Python
+   global) → `python` SOMENTE quando a ponte for encontrada em árvore de dev. Em
+   distribuição sem o runtime privado: erro EXPLÍCITO, nunca o Python do usuário.
+   Protocolo stdin/stdout persistente INALTERADO.
+2. **`bridge_path()`**: NENHUMA mudança necessária — a varredura por ancestrais acha
+   `launcher/cinematic/bridge/launcher_bridge.py` no layout instalado (hierarquia
+   preservada, ver seção 1).
 3. **cwd do worker**: a ponte roda com cwd = raiz do port (ancestrais da bridge) — no
    layout instalado isso continua válido (bridge fica sob a raiz). `PORT_DIR`,
    `find_tool` (procura `bin/` antes de `out/`) e `run_command()` (Python em uso =
@@ -66,20 +82,26 @@ A pasta do JOGO permanece externa, escolhida pelo usuário e persistida em
    a ponte usa a biblioteca NÃO congelada, então **PyInstaller não é necessário** e os
    reinícios internos (`run.py --after` re-executado pelo jogo) continuam funcionando com
    o mesmo interpretador.
-4. **Dados graváveis**: `DATA_DIR = env GOW3_DATA_DIR || PORT_DIR`. Com instalação em
-   `%LOCALAPPDATA%` tudo é gravável e o modo portátil do port é preservado. Alternativa
-   (instalação em Program Files) exigiria redirecionar `GOW3_DATA_DIR` — NÃO recomendada.
-5. **Sombreamento de Python**: se o usuário tiver Python global, o runtime privado ainda
-   deve vencer (ordem de resolução do item 1) para evitar mistura de versões/Pillow.
+4. **Dados graváveis**: `DATA_DIR = env GOW3_DATA_DIR || PORT_DIR` — nada é configurado
+   automaticamente pela existência de pastas. Com instalação em `%LOCALAPPDATA%` o
+   PORT_DIR É gravável e os dados (user/, out/, gow3.ini, mods/, caches, screenshots em
+   user/screenshots) são escritos DENTRO da raiz da instalação — mesma semântica
+   portátil da distribuição zip oficial do upstream. O desinstalador remove SOMENTE os
+   imutáveis do manifesto e PRESERVA esses graváveis (política da seção 4). Instalação
+   em Program Files (não recomendada) exigiria exportar GOW3_DATA_DIR no atalho.
+5. **Sombreamento de Python**: o runtime privado tem PRIORIDADE absoluta (item 1); em
+   distribuição, sem o runtime privado o launcher falha com erro explícito — nunca usa
+   silenciosamente um Python global.
 
 ## 4. Política de preservação de dados (atualização/desinstalação)
 
-- **Nunca apagar**: `data\` (user/saves, backups, out, gow3.ini, mods, mods.json,
-  patches.json, caches), `settings.json` em `%APPDATA%\gow3-launcher`, e a pasta do jogo
-  externa. NSIS: seção de dados declarada sem `/REBOOTOK`, `uninstaller` remove SOMENTE
-  os arquivos instalados pelo manifesto (lista explícita — nada de `RMDir /r` na raiz de
-  dados), atualização = sobreposição dos imutáveis preservando os graváveis (mesma
-  semântica do refresh do `package.sh` oficial).
+- **Nunca apagar**: os dados graváveis DENTRO da instalação (`user/` com saves,
+  screenshots e caches, `out/`, `gow3.ini`, `mods/`, `mods.json`, `patches.json`,
+  backups), `settings.json` em `%APPDATA%\gow3-launcher`, e a pasta do jogo externa.
+  NSIS: `uninstaller` remove SOMENTE os arquivos instalados pelo manifesto (lista
+  explícita — nada de `RMDir /r` na raiz), atualização = sobreposição dos imutáveis
+  preservando os graváveis (mesma semântica do refresh do `package.sh` oficial);
+  nenhuma migração sobrescreve dados existentes.
 - **Ícone, nome exibido e versão**: `productName` "God of War III (Cinematic)",
   identificador `br.frosttys18.gow3.cinematic`; metadados de versão do instalador
   independentes (0.1.x) dos da app.
