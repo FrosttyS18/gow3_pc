@@ -1,4 +1,4 @@
-# CONTRATO DO LAUNCHER CINEMATOGRÁFICO — v2.0 (2026-10-14)
+# CONTRATO DO LAUNCHER CINEMATOGRÁFICO — v2.1 (2026-10-15)
 
 **Este documento é a fonte ÚNICA de verdade para a estrutura, navegação e comportamento
 do launcher React+Tauri. Upstream (launcher Tkinter do Felipe) fornece FUNCIONALIDADES
@@ -8,8 +8,14 @@ pode sobrepor este contrato sem decisão explícita do mantenedor.**
 ## 1. IDENTIDADE
 
 - O launcher cinematográfico é um projeto visual PRÓPRIO derivado do Figma do mantenedor.
-- Composição: Kratos à esquerda (arte 1920×1080 cover), coluna direita escurecida,
-  logo topo-direita (eixo 88,8%), menu vertical, JOGAR inferior-direito, rodapé real.
+- Composição: Kratos à esquerda — **fundo em VÍDEO (PR #13, pendente de merge): um único
+  `<video>` mudo em loop cobrindo a mesma área da imagem, 16:9 cover, fade-in só quando
+  pronto, imagem estática por baixo como fallback imediato; na main vigente vale a imagem
+  estática** —, coluna direita escurecida, logo topo-direita (eixo 88,8%), menu vertical,
+  JOGAR inferior-direito, rodapé real.
+- **Menu lateral (PR #13, pendente): todos os itens em BRANCO PURO #FFFFFF (incluindo
+  Música nos dois estados de aria-pressed) com sombra preta discreta** para legibilidade
+  sobre qualquer cena do vídeo; na main vigente vale o cinza #4c4c4c histórico.
 - Viewport de referência: **1280×720** (escala 2/3 do Figma 1920×1080).
 
 ## 2. NAVEGAÇÃO (IDs imutáveis)
@@ -17,12 +23,12 @@ pode sobrepor este contrato sem decisão explícita do mantenedor.**
 | Ordem | ID          | pt-BR       | English      | Função                          |
 |-------|-------------|-------------|--------------|---------------------------------|
 | 1     | display     | Tela        | Display      | Configurações de vídeo/janela   |
-| 2     | graphics    | Gráficos    | Graphics     | Upscaling estacionado (v2.2.0) |
+| 2     | graphics    | Gráficos    | Graphics     | Anisotropia 0-16× + upscaling estacionado (v2.2.0) |
 | 3     | performance | Desempenho  | Performance  | FPS, GPU, shaders               |
 | 4     | game        | Jogo        | Game         | Cheats, pastas, saves, idioma   |
 | 5     | patches     | Patches     | Patches      | Patches internos + externos     |
 | 6     | mods        | Mods        | Mods         | Mods, ordem, presets            |
-| 7     | controls    | Controles   | Controls     | Remapeamento teclado/controle   |
+| 7     | controls    | Controles   | Controls     | Remapeamento + ícones in-game + vibração 0-100% |
 | 8     | advanced    | Avançado    | Advanced     | Launcher, arquivos, diagnóstico |
 | 9     | log         | Registro    | Log          | Log de execução                 |
 | —     | (ação)      | Música      | Music        | Toggle mute, NÃO é rota         |
@@ -143,9 +149,13 @@ O projeto acompanha as atualizações técnicas estáveis de FelipePrado0/gow3_p
   justificativa + aprovação visual específica do mantenedor.
 - Nenhuma substituição de UI, nenhum bypass, nenhum merge automático.
 
-**Versão técnica integrada (branch `chore/upstream-windows-v2.2.0`):** windows-v2.2.0,
-commit af5930a0e3bb6bd257563d0bfd6fa09210a78310 — árvore oficial blob-idêntica (36 arquivos),
-launcher/cinematic/** preservado.
+**Versão técnica integrada (main `1b2379d`):** windows-v2.3.0,
+commit f80021b0b6d9ef6b6c91624b0ed9ae7a3ecb3f51 — árvore oficial blob-provada (40 arquivos
+na exceção), launcher/cinematic/** preservado, Discord Rich Presence DESATIVADO por design
+(`GOW3_DISCORD=0` em toda partida, mesmo com preferência legada — sem UI, sem auto-adição).
+Funcionalidades v2.3.0 refletidas: anisotropia 0-16× (Gráficos), vibração 0-100%
+(Controles, Slider do design system com gravação consolidada), screenshots F12 do motor
+(PNG em `user/screenshots`, sem UI própria), avisos de memória e correções de texturas.
 **Prioridades:** compatibilidade, novas funcionalidades, gravação segura de configurações, patches obrigatórios, inicialização do jogo e gerenciamento de processos.
 
 ## 10. TESTES ANTIRREGRESSÃO

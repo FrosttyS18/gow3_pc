@@ -348,3 +348,23 @@ multisampling automático (`no-msaa`, `test_launcher_no_msaa`) · seleção de G
 (`amd-paths`, `vk_amd_paths.h`) · Sc0 (`test_launcher_game_files`) · logs de execução
 (`test_launcher_run_log`) · Steam (`test_steam_shortcut`) · patches por assinatura
 (`signatures`, `test_patches` 13 OK; `REFERENCE_SHA256` apenas de referência).
+
+---
+
+## Estado atual (adendo 2026-10-15 — histórico acima preservado sem alterações)
+
+Esta baseline documenta o estado do BOOTSTRAP (2026-10-12) e permanece intacta como
+registro histórico; nenhum resultado passado foi reescrito. O estado TÉCNICO ATUAL do
+fork vive em documentos próprios:
+
+- Motor/port: **windows-v2.3.0** integrado e mergeado (main `1b2379d`; sincronizações
+  v2.1.7→v2.3.0 com provas de blob em `zcode/upstream-exceptions/` e registro
+  APPROVED_UPSTREAM; fluxo aprovado: registry-first → sync tree-idêntico → gate verde →
+  merge normal).
+- Launcher cinematográfico React+Tauri 2 é a interface principal do fork: arquitetura,
+  worker Python persistente e supervisão nativa de processos em
+  `launcher/cinematic/README.md` e `launcher/cinematic/CONTRACT.md`.
+- Distribuição Windows / plano de instalador NSIS: `docs/CINEMATIC-DISTRIBUTION.md`.
+- Suítes de referência atuais: ponte `launcher/cinematic/tests/test_bridge.py` (35),
+  UI CDP `launcher/cinematic/tests/test_ui.py` (48+), cargo serializado 13/13, suíte
+  python do port 306 PASS / 0 FAIL.
