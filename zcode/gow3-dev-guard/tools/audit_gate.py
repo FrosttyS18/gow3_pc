@@ -78,6 +78,10 @@ APPROVED_UPSTREAM = {
         "repo": "https://github.com/FelipePrado0/gow3_pc",
         "commit": "f80021b0b6d9ef6b6c91624b0ed9ae7a3ecb3f51",
     },
+    "windows-v2.4.0": {
+        "repo": "https://github.com/FelipePrado0/gow3_pc",
+        "commit": "7180a7bafa51afbe991523f6392f69ea1cf03e1e",
+    },
 }
 
 # Security surfaces: every workflow file and the whole harness/plugin tree. Any change
