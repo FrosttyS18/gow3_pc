@@ -32,3 +32,7 @@ launcher/cinematic/dist/
 launcher/cinematic/src-tauri/target/
 launcher/cinematic/src-tauri/gen/
 launcher/cinematic/public/art/
+# App icons referenced by tauri.conf.json bundle.icon: needed in a CLEAN checkout
+# build (the global *.png rule must not remove them). Specific exceptions only.
+!launcher/cinematic/src-tauri/icons/32x32.png
+!launcher/cinematic/src-tauri/icons/128x128.png
