@@ -403,9 +403,9 @@ class UpstreamV230Tests(BridgeFixture):
         self.assertIs(saved.get("discord_rpc"), True,
                       "a preferência existente não deve ser reescrita")
 
-    def test_version_230_and_legacy_keys_preserved(self):
+    def test_version_and_legacy_keys_preserved(self):
         _, state = self.bridge({"cmd": "state"})
-        self.assertEqual(state["version"], "2.3.0")
+        self.assertEqual(state["version"], "2.4.0")
         # preferências legadas continuam no contrato do port
         for key in ("anisotropy", "vibration", "upscaler", "display_mode"):
             self.assertIn(key, state["ini"])
@@ -497,6 +497,104 @@ class UpstreamV220Tests(BridgeFixture):
                          ["fsr3", "taa", "off"])
         self.assertNotIn("fsr4", state, "fsr4 foi removido do upstream v2.2.0")
         self.assertNotIn("dlss", [c["value"] for c in state["choices"]["upscaler"]])
+
+
+class UpstreamV240Tests(BridgeFixture):
+    """v2.4.0: ultrawide nativo (rótulos oficiais com dimensão/proporção/beta),
+    partial_height_views (Efeitos de tela rápidos), patches XML em mods e Discord OFF."""
+
+    def test_ultrawide_choices_with_labels(self):
+        _, state = self.bridge({"cmd": "state"})
+        values = [c["value"] for c in state["choices"]["render_resolution"]]
+        for name in ("2560x1080", "3440x1440", "3840x1600", "5120x1440",
+                     "1920x1200", "2560x1600"):
+            self.assertIn(name, values, f"resolução v2.4.0 faltando: {name}")
+        labels = {c["value"]: c["label"] for c in state["choices"]["render_resolution"]}
+        self.assertIn("2560 × 1080 · 21:9 (beta)", labels["2560x1080"])
+        self.assertIn("3440 × 1440 · 21:9 (beta)", labels["3440x1440"])
+        self.assertIn("5120 × 1440 · 32:9 (beta)", labels["5120x1440"])
+        self.assertIn("1920 × 1200 · 16:10 (beta)", labels["1920x1200"])
+        self.assertIn("1440p · 2560 × 1440 · 16:9", labels["1440p"])
+
+    def test_ultrawide_resolution_writes_and_env(self):
+        _, r = self.bridge({"cmd": "set_ini", "values": {"render_resolution": "3440x1440"}})
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["ini"]["render_resolution"], "3440x1440")
+        text = (self.data / "gow3.ini").read_text(encoding="utf-8")
+        self.assertIn("render_resolution=3440x1440", text)
+        # o ambiente da partida deve concordar (leitura oficial do gow3.ini)
+        code = ("import sys; sys.path.insert(0, {dir!r});\n"
+                "import graphics_options as G\n"
+                "ini = G.read_ini({cfg!r})\n"
+                "print(ini.get('render_resolution'), ini.get('engine_fps'))")
+        done = subprocess.run([sys.executable, "-c", code.format(
+            dir=str(LAUNCHER_DIR.parents[0] / "scripts"), cfg=str(self.data / "gow3.ini"))],
+            capture_output=True, text=True, env=self.env, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr[-300:])
+        self.assertIn("3440x1440", done.stdout)
+
+    def test_partial_height_views_default_on_and_env(self):
+        _, state = self.bridge({"cmd": "state"})
+        self.assertIs(state["app"].get("partial_height_views"), True,
+                      "padrão do upstream: ativado")
+        code = ("import sys; sys.path.insert(0, {dir!r});\n"
+                "import gow3_launcher_win as L\n"
+                "env = L.game_environment({{**L.APP_DEFAULTS, 'game_dir': '', 'user_dir': ''}})\n"
+                "print(env.get('GOW3_PARTIAL_HEIGHT_VIEWS'))")
+        done = subprocess.run([sys.executable, "-c", code.format(dir=str(LAUNCHER_DIR))],
+                              capture_output=True, text=True, env=self.env, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr[-300:])
+        self.assertEqual(done.stdout.strip(), "1", "GOW3_PARTIAL_HEIGHT_VIEWS=1 por padrão")
+
+    def test_partial_height_views_toggle_writes_settings(self):
+        _, r = self.bridge({"cmd": "set_app", "values": {"partial_height_views": False}})
+        self.assertTrue(r["ok"])
+        saved = json.loads((self.appdata / "gow3-launcher" / "settings.json")
+                           .read_text(encoding="utf-8"))
+        self.assertIs(saved["partial_height_views"], False)
+
+    def test_mod_resolution_choices_from_enabled_mod(self):
+        """Patches XML em mods (v2.4.0): um mod habilitado com Resolution Patch
+        aparece como escolha '(mod)'; desabilitado, não aparece."""
+        mod = self.data / "mods" / "ModUltra"
+        (mod / "patches").mkdir(parents=True)
+        (mod / "patches" / "extra.xml").write_text(
+            '<Patch><Metadata Title="God of War III Remastered" '
+            'Name="Resolution Patch - 4096x2160" AppVer="01.02" isEnabled="true">'
+            '</Metadata></Patch>', encoding="utf-8")
+        (self.data / "mods.json").write_text(
+            json.dumps({"order": ["ModUltra"], "disabled": []}), encoding="utf-8")
+        _, state = self.bridge({"cmd": "state"})
+        values = [c["value"] for c in state["choices"]["render_resolution"]]
+        labels = {c["value"]: c["label"] for c in state["choices"]["render_resolution"]}
+        self.assertIn("4096x2160", values)
+        self.assertIn("(mod)", labels["4096x2160"])
+        # desabilita o mod → a resolução some
+        (self.data / "mods.json").write_text(
+            json.dumps({"order": ["ModUltra"], "disabled": ["ModUltra"]}), encoding="utf-8")
+        _, state2 = self.bridge({"cmd": "state"})
+        values2 = [c["value"] for c in state2["choices"]["render_resolution"]]
+        self.assertNotIn("4096x2160", values2)
+
+    def test_ultrawide_builtin_not_mod_legacy(self):
+        """O ultrawide é INTEGRADO: nenhum mod 'Ultrawide' precisa existir; as opções
+        nativas vêm SEM mod algum instalado (fixture não tem mods)."""
+        _, state = self.bridge({"cmd": "state"})
+        values = [c["value"] for c in state["choices"]["render_resolution"]]
+        self.assertIn("3440x1440", values)
+        self.assertFalse(any("(mod)" in c["label"] for c in state["choices"]["render_resolution"]))
+
+    def test_discord_still_off_and_version_240(self):
+        _, state = self.bridge({"cmd": "state"})
+        self.assertEqual(state["version"], "2.4.0")
+        self.assertIs(state["app"].get("discord_rpc"), False)
+        code = ("import sys; sys.path.insert(0, {dir!r});\n"
+                "import gow3_launcher_win as L\n"
+                "env = L.game_environment({{**L.APP_DEFAULTS, 'game_dir': '', 'user_dir': ''}})\n"
+                "print(env.get('GOW3_DISCORD'))")
+        done = subprocess.run([sys.executable, "-c", code.format(dir=str(LAUNCHER_DIR))],
+                              capture_output=True, text=True, env=self.env, timeout=60)
+        self.assertEqual(done.stdout.strip(), "0")
 
 
 if __name__ == "__main__":

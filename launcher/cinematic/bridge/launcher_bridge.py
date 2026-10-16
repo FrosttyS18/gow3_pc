@@ -36,6 +36,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # launcher/ on the path
 import gow3_launcher_win as L  # noqa: E402  (the port's launcher, as a library)
 sys.path.insert(0, str(L.PORT_DIR / "scripts"))  # mods/save_backup/patches live here
+import graphics_options  # noqa: E402  (labels de resolução com dimensão/proporção/beta)
+from patches import resolution_names  # noqa: E402  (resoluções extras de mods habilitados)
 
 MUSIC_KEYS = ("ambient_volume", "ambient_muted", "ambient_file")
 RUN_LOG = Path(tempfile.gettempdir()) / "gow3-cinematic-run.log"
@@ -143,11 +145,30 @@ def cached_gpus():
     return rows
 
 
+def mod_resolution_choices(app: dict) -> list:
+    """Resoluções de renderização que os MODS HABILITADOS adicionam (patches XML em
+    mods, v2.4.0): mesmos rótulos oficiais com sufixo '(mod)'. O jogo precisa do mod
+    ativo para a resolução existir — por isso entram como escolhas distintas."""
+    from mods import patch_files
+    state = mods_state(app)
+    enabled = [name for name in state["order"] if name not in state["disabled"]]
+    root = Path(app.get("mods_dir") or L.DATA_DIR / "mods")
+    files = []
+    for name in enabled:
+        files.extend(patch_files(root / name))
+    extra = [size for size in resolution_names(files)
+             if size not in graphics_options.RESOLUTIONS]
+    return [{"value": size, "label": graphics_options.resolution_label(size) + " (mod)"}
+            for size in extra]
+
+
 def all_choices(app: dict) -> dict:
     gpus = cached_gpus()
     c = {
         "display_mode": choice_labels(L.DISPLAY_MODES),
-        "render_resolution": choice_labels(L.RESOLUTION_CHOICES),
+        # v2.4.0: rótulos OFICIAIS com dimensão, proporção e marcação beta
+        # (ex.: '2560 × 1080 · 21:9 (beta)') + resoluções extras dos mods habilitados
+        "render_resolution": choice_labels(L.RESOLUTION_CHOICES) + mod_resolution_choices(app),
         "engine_fps": choice_labels(L.ENGINE_FPS_CHOICES),
         "fps_limit": choice_labels(L.FPS_LIMITS),
         "upscaler": choice_labels(L.UPSCALERS),

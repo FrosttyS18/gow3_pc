@@ -102,9 +102,17 @@ export function PerformancePage({ state, refresh }: P) {
             onChange={(v) => setIni("engine_fps", v)} label="Taxa de quadros do motor" />
         </Field>
         <Field label="Resolução de renderização" restart
-               hint="O tamanho em que o jogo desenha; maior é mais nítido e mais pesado.">
-          <Dropdown value={ini.render_resolution ?? "native"} choices={state.choices.render_resolution}
+               hint="O tamanho em que o jogo desenha; ultrawide e 16:10 são beta. '(mod)' exige o mod ativo.">
+          <Dropdown value={ini.render_resolution ?? "native"} choices={state.choices.render_resolution ?? []}
             onChange={(v) => setIni("render_resolution", v)} label="Resolução de renderização" />
+        </Field>
+        <Field label={t("Play") === "Jogar" ? "Efeitos de tela rápidos" : "Fast screen effects"} restart
+               hint={t("Play") === "Jogar"
+                 ? "Mantém efeitos de poderes e armas (Fúria de Esparta, Exército de Esparta) a todo vapor. Desligue se algum efeito de tela ficar esticado, deslocado ou estranho."
+                 : "Keeps powers and weapon effects (Rage of Sparta, Army of Sparta) at full FPS. Switch it off if a screen effect looks stretched, shifted or wrong."}>
+          <Toggle value={app.partial_height_views !== false}
+            onChange={(v) => setApp("partial_height_views", v)}
+            label={t("Play") === "Jogar" ? "Efeitos de tela rápidos" : "Fast screen effects"} />
         </Field>
       </Section>
       <Section title={t("Play") === "Jogar" ? "Shaders" : "Shaders"}>
